@@ -357,9 +357,10 @@ def generate_guest_code(duration_minutes=10):
     with guest_codes_lock:
         guest_codes[code] = {
             "created": now,
-            "expires_at": now + (duration_minutes * 60),
+            "expires_at": None,  # Starts when first redeemed
             "duration": duration_minutes * 60,
             "redeemed_by": None,
+            "redeemed_at": None,
             "active": True,
         }
         _save_guest_codes()
@@ -375,7 +376,8 @@ def redeem_guest_code(code):
             return None, "Invalid code."
         if not entry["active"]:
             return None, "Code already used."
-        if time.time() > entry["expires_at"]:
+        # Check expiry only if code was already redeemed (has expires_at)
+        if entry["expires_at"] and time.time() > entry["expires_at"]:
             entry["active"] = False
             return None, "Code expired."
         # Mark as redeemed
@@ -385,6 +387,10 @@ def redeem_guest_code(code):
         if entry.get("persistent"):
             entry["active"] = True
             entry["redeemed_by"] = None
+        # Start countdown on first redemption (not generation)
+        if entry["expires_at"] is None:
+            entry["expires_at"] = time.time() + entry["duration"]
+            entry["redeemed_at"] = time.time()
         _save_guest_codes()
         # Generate guest user
         guest_id = f"guest-{code}"
@@ -427,7 +433,16 @@ def get_active_codes():
     result = []
     with guest_codes_lock:
         for code, entry in guest_codes.items():
-            remaining = max(0, int(entry["expires_at"] - now))
+            expires_at = entry.get("expires_at")
+            if expires_at is None:
+                # Dormant code — not yet redeemed
+                remaining = entry["duration"]
+                expired = False
+                dormant = True
+            else:
+                remaining = max(0, int(expires_at - now))
+                expired = now > expires_at
+                dormant = False
             result.append({
                 "code": code,
                 "created": entry["created"],
@@ -435,7 +450,8 @@ def get_active_codes():
                 "remaining": remaining,
                 "redeemed_by": entry["redeemed_by"],
                 "active": entry["active"],
-                "expired": now > entry["expires_at"],
+                "expired": expired,
+                "dormant": dormant,
                 "persistent": entry.get("persistent", False),
             })
     return sorted(result, key=lambda x: x["created"], reverse=True)

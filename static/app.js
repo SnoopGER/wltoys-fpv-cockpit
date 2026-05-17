@@ -1308,8 +1308,8 @@ async function refreshGuestCodes() {
         return;
       }
       list.innerHTML = data.codes.map(c => {
-        const status = c.active ? '🟢 Active' : (c.expired ? '🔴 Expired' : '🟡 Used');
-        const remaining = c.active ? `${Math.floor(c.remaining/60)}m ${c.remaining%60}s` : '';
+        const status = c.dormant ? '⏳ Waiting' : (c.active ? '🟢 Active' : (c.expired ? '🔴 Expired' : '🟡 Used'));
+        const remaining = c.dormant ? `${Math.floor(c.duration/60)}m ready` : (c.active ? `${Math.floor(c.remaining/60)}m ${c.remaining%60}s` : '');
         return `<div class="guest-code-row">
           <span class="guest-code-text">${c.code}</span>
           <span class="guest-code-status">${status} ${remaining}</span>

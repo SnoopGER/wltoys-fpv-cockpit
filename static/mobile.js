@@ -113,7 +113,8 @@ function stopVideoFeed() {
 }
 
 // ── Touch Controls ────────────────────────────────────────
-let currentCommand = null;
+// Track pressed buttons individually (like desktop keyboard)
+const activeButtons = new Set(); // 'forward', 'reverse', 'left', 'right'
 let commandInterval = null;
 const COMMAND_SEND_INTERVAL = 100; // Send command every 100ms while button held
 
@@ -126,31 +127,54 @@ function sendCommand(command, speed = 100, steerRange = 100) {
   }).catch(() => {});
 }
 
-function startCommand(command) {
-  if (currentCommand === command) return;
-  
-  // Stop previous command
-  stopCommand();
-  
-  currentCommand = command;
-  sendCommand(command);
-  
-  // Continue sending while button held
-  commandInterval = setInterval(() => {
-    sendCommand(command);
-  }, COMMAND_SEND_INTERVAL);
+// Compute combined command from all pressed buttons
+function computeMobileCommand() {
+  let throttle = null; // 'forward' | 'reverse' | null
+  let steer = null;    // 'left' | 'right' | null
+
+  if (activeButtons.has('forward')) throttle = 'forward';
+  else if (activeButtons.has('reverse')) throttle = 'reverse';
+  if (activeButtons.has('left')) steer = 'left';
+  else if (activeButtons.has('right')) steer = 'right';
+
+  if (!throttle && !steer) return 'stop';
+  if (throttle && !steer) return throttle;
+  if (!throttle && steer) return steer;
+  return throttle + '_' + steer; // forward_left, forward_right, reverse_left, reverse_right
 }
 
-function stopCommand() {
+function updateMobileMotor() {
+  const cmd = computeMobileCommand();
+  sendCommand(cmd);
+
+  // Start continuous sending if any button pressed
+  if (cmd !== 'stop' && !commandInterval) {
+    commandInterval = setInterval(() => {
+      sendCommand(computeMobileCommand());
+    }, COMMAND_SEND_INTERVAL);
+  } else if (cmd === 'stop' && commandInterval) {
+    clearInterval(commandInterval);
+    commandInterval = null;
+  }
+}
+
+function pressButton(btn) {
+  activeButtons.add(btn);
+  updateMobileMotor();
+}
+
+function releaseButton(btn) {
+  activeButtons.delete(btn);
+  updateMobileMotor();
+}
+
+function releaseAllButtons() {
+  activeButtons.clear();
   if (commandInterval) {
     clearInterval(commandInterval);
     commandInterval = null;
   }
-  
-  if (currentCommand) {
-    sendCommand('stop');
-    currentCommand = null;
-  }
+  sendCommand('stop');
 }
 
 // ── Button Event Handlers ─────────────────────────────────
@@ -164,58 +188,58 @@ function setupTouchControls() {
   if (btnThrottle) {
     btnThrottle.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      startCommand('forward');
+      pressButton('forward');
       btnThrottle.classList.add('active');
     });
     btnThrottle.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      startCommand('forward');
+      pressButton('forward');
       btnThrottle.classList.add('active');
     });
     btnThrottle.addEventListener('mouseup', () => {
-      stopCommand();
+      releaseButton('forward');
       btnThrottle.classList.remove('active');
     });
     btnThrottle.addEventListener('mouseleave', () => {
-      stopCommand();
+      releaseButton('forward');
       btnThrottle.classList.remove('active');
     });
     btnThrottle.addEventListener('touchend', () => {
-      stopCommand();
+      releaseButton('forward');
       btnThrottle.classList.remove('active');
     });
     btnThrottle.addEventListener('touchcancel', () => {
-      stopCommand();
+      releaseButton('forward');
       btnThrottle.classList.remove('active');
     });
   }
   
-  // Brake (backward)
+  // Brake (reverse)
   if (btnBrake) {
     btnBrake.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      startCommand('reverse');
+      pressButton('reverse');
       btnBrake.classList.add('active');
     });
     btnBrake.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      startCommand('reverse');
+      pressButton('reverse');
       btnBrake.classList.add('active');
     });
     btnBrake.addEventListener('mouseup', () => {
-      stopCommand();
+      releaseButton('reverse');
       btnBrake.classList.remove('active');
     });
     btnBrake.addEventListener('mouseleave', () => {
-      stopCommand();
+      releaseButton('reverse');
       btnBrake.classList.remove('active');
     });
     btnBrake.addEventListener('touchend', () => {
-      stopCommand();
+      releaseButton('reverse');
       btnBrake.classList.remove('active');
     });
     btnBrake.addEventListener('touchcancel', () => {
-      stopCommand();
+      releaseButton('reverse');
       btnBrake.classList.remove('active');
     });
   }
@@ -224,28 +248,28 @@ function setupTouchControls() {
   if (btnSteerLeft) {
     btnSteerLeft.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      startCommand('left');
+      pressButton('left');
       btnSteerLeft.classList.add('active');
     });
     btnSteerLeft.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      startCommand('left');
+      pressButton('left');
       btnSteerLeft.classList.add('active');
     });
     btnSteerLeft.addEventListener('mouseup', () => {
-      stopCommand();
+      releaseButton('left');
       btnSteerLeft.classList.remove('active');
     });
     btnSteerLeft.addEventListener('mouseleave', () => {
-      stopCommand();
+      releaseButton('left');
       btnSteerLeft.classList.remove('active');
     });
     btnSteerLeft.addEventListener('touchend', () => {
-      stopCommand();
+      releaseButton('left');
       btnSteerLeft.classList.remove('active');
     });
     btnSteerLeft.addEventListener('touchcancel', () => {
-      stopCommand();
+      releaseButton('left');
       btnSteerLeft.classList.remove('active');
     });
   }
@@ -254,28 +278,28 @@ function setupTouchControls() {
   if (btnSteerRight) {
     btnSteerRight.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      startCommand('right');
+      pressButton('right');
       btnSteerRight.classList.add('active');
     });
     btnSteerRight.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      startCommand('right');
+      pressButton('right');
       btnSteerRight.classList.add('active');
     });
     btnSteerRight.addEventListener('mouseup', () => {
-      stopCommand();
+      releaseButton('right');
       btnSteerRight.classList.remove('active');
     });
     btnSteerRight.addEventListener('mouseleave', () => {
-      stopCommand();
+      releaseButton('right');
       btnSteerRight.classList.remove('active');
     });
     btnSteerRight.addEventListener('touchend', () => {
-      stopCommand();
+      releaseButton('right');
       btnSteerRight.classList.remove('active');
     });
     btnSteerRight.addEventListener('touchcancel', () => {
-      stopCommand();
+      releaseButton('right');
       btnSteerRight.classList.remove('active');
     });
   }
