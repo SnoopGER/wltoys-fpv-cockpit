@@ -4,7 +4,17 @@
 
 Reverse-engineered from the Android app (`com.lg.wltechfpvcar`). No encryption, no cloud, pure local UDP.
 
-![Python](https://img.shields.io/badge/python-3.10+-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Status](https://img.shields.io/badge/status-working-brightgreen)
+![Python](https://img.shields.io/badge/python-3.10+-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Status](https://img.shields.io/badge/V1-complete-brightgreen)
+
+---
+
+## Project Status
+
+**FPV Dashboard V1 is complete and stable on the `main` branch.**
+
+V1 is the local/LAN cockpit baseline: video stream, car handshake, motor control, keyboard/D-pad/gamepad inputs, Moza wheel/pedal support, debug tooling, and protocol documentation. See [docs/V1-COMPLETE.md](docs/V1-COMPLETE.md) for the completion milestone and handoff notes.
+
+Active V2 work lives separately on the `codex-discord-race-lobby` branch and adds Discord OAuth, remote race lobby, driver queue, admin moderation, and LAN/Cloudflare routing. Keep V1 available on `main` as the stable rollback/reference version.
 
 ---
 
@@ -29,7 +39,7 @@ Reverse-engineered from the Android app (`com.lg.wltechfpvcar`). No encryption, 
 
 ```bash
 # Clone the repo
-git clone https://github.com/YOUR_USERNAME/wltoys-fpv-cockpit.git
+git clone https://github.com/SnoopGER/wltoys-fpv-cockpit.git
 cd wltoys-fpv-cockpit
 
 # Install dependencies
@@ -227,6 +237,8 @@ wltoys-fpv-cockpit/
 ├── requirements.txt            ← Python dependencies
 ├── start.sh                    ← Launcher script
 ├── start-fpv-debug.sh          ← LAN launcher script
+├── docs/
+│   └── V1-COMPLETE.md           ← V1 completion milestone and V2 handoff
 ├── CAR.pcap                    ← Reference packet capture from the original app
 ├── CAR WIFI INFO               ← Car connection reference
 ├── car_protocol.py             ← UDP protocol implementation
