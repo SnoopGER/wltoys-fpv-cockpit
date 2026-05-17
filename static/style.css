@@ -262,6 +262,12 @@ main {
 .btn-blue { border-color: var(--blue); color: var(--blue); }
 .btn-blue:hover { background: rgba(0, 204, 255, 0.1); }
 
+.btn-active {
+  background: rgba(255, 200, 0, 0.2);
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+
 .btn-small {
   padding: 4px 10px;
   font-size: 10px;

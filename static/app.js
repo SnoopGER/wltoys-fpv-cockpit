@@ -1086,6 +1086,53 @@ function snapshot() {
   a.click();
 }
 
+// Admin stream controls
+let adminStreamPaused = false;
+let adminSmartMode = false;
+
+async function togglePauseStream() {
+  adminStreamPaused = !adminStreamPaused;
+  const btn = $('btnPauseStream');
+
+  try {
+    const resp = await fetch('/api/stream/pause', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ paused: adminStreamPaused }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      btn.textContent = adminStreamPaused ? '▶️ Resume' : '⏸️ Pause';
+      btn.classList.toggle('btn-active', adminStreamPaused);
+      addLog('SYS', `Admin stream ${adminStreamPaused ? 'paused' : 'resumed'}`);
+    }
+  } catch (e) {
+    addLog('ERR', 'Failed to toggle pause: ' + e.message);
+  }
+}
+
+async function toggleSmartMode() {
+  adminSmartMode = !adminSmartMode;
+  const btn = $('btnSmartMode');
+
+  try {
+    const resp = await fetch('/api/stream/smart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ smart: adminSmartMode }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      btn.classList.toggle('btn-active', adminSmartMode);
+      addLog('SYS', `Smart mode ${adminSmartMode ? 'enabled (5fps)' : 'disabled (full fps)'}`);
+    }
+  } catch (e) {
+    addLog('ERR', 'Failed to toggle smart mode: ' + e.message);
+  }
+}
+
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);

@@ -1169,6 +1169,11 @@ def api_protocol():
 
 # Video Stream
 
+# Admin stream state (per-session, not global)
+admin_stream_paused = {}  # sid -> bool
+admin_stream_smart = {}   # sid -> bool
+
+
 @app.route("/api/stream")
 def api_stream():
     user, error = require_user()
@@ -1176,9 +1181,17 @@ def api_stream():
         return error
     init_car()
 
+    is_admin = user.get("role") == "admin"
+    sid = request.args.get("sid", str(id(request)))
+
     def generate():
         last_count = -1
         while True:
+            # Check admin pause state
+            if is_admin and admin_stream_paused.get(sid, False):
+                time.sleep(0.5)
+                continue
+
             jpeg = decoder.get_latest_jpeg() if decoder else None
             if jpeg:
                 frame_count = decoder.frame_count
@@ -1187,13 +1200,52 @@ def api_stream():
                     yield (b"--frame\r\n"
                            b"Content-Type: image/jpeg\r\n\r\n"
                            + jpeg + b"\r\n")
-            time.sleep(0.005)
+
+            # Smart mode: limit admin to 5fps when enabled
+            if is_admin and admin_stream_smart.get(sid, False):
+                time.sleep(0.2)  # 5fps
+            else:
+                time.sleep(0.005)  # ~200fps max (normal)
 
     return Response(
         generate(),
         mimetype="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"},
     )
+
+
+@app.route("/api/stream/pause", methods=["POST"])
+def api_stream_pause():
+    """Toggle admin stream pause state."""
+    user, error = require_user()
+    if error:
+        return error
+    if user.get("role") != "admin":
+        return jsonify({"ok": False, "error": "admin_required"}), 403
+
+    data = request.get_json(silent=True) or {}
+    paused = data.get("paused", False)
+    sid = data.get("sid", str(id(request)))
+
+    admin_stream_paused[sid] = paused
+    return jsonify({"ok": True, "paused": paused})
+
+
+@app.route("/api/stream/smart", methods=["POST"])
+def api_stream_smart():
+    """Toggle admin smart mode (5fps limit)."""
+    user, error = require_user()
+    if error:
+        return error
+    if user.get("role") != "admin":
+        return jsonify({"ok": False, "error": "admin_required"}), 403
+
+    data = request.get_json(silent=True) or {}
+    smart = data.get("smart", False)
+    sid = data.get("sid", str(id(request)))
+
+    admin_stream_smart[sid] = smart
+    return jsonify({"ok": True, "smart": smart})
 
 
 # Socket.IO

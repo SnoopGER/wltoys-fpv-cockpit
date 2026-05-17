@@ -55,6 +55,10 @@
     <div class="panel-header">
       <span>📹 LIVE FEED</span>
       <div class="video-controls">
+        {% if user and user.role == 'admin' %}
+        <button id="btnPauseStream" onclick="togglePauseStream()" title="Pause/Resume admin video feed">⏸️ Pause</button>
+        <button id="btnSmartMode" onclick="toggleSmartMode()" title="Smart mode: limit admin to 5fps when guest is connected">🧠 Smart</button>
+        {% endif %}
         <button onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
         <button onclick="snapshot()" title="Snapshot">📷</button>
       </div>
