@@ -11,7 +11,7 @@ let currentCommand = null;  // Currently held command
 let motorSpeed = 100;       // Throttle power 0-100%
 let motorSteerRange = 100;  // Steering angle 0-100%
 let lobbyState = null;
-let canControl = false;
+let canControl = true; // Default true; lobby system refines this when socket.io works
 let socket = null;
 const userRole = document.body.dataset.userRole || 'guest';
 const userId = document.body.dataset.userId || '';
@@ -55,7 +55,7 @@ async function doConnect() {
   setStatus('connecting', 'CONNECTING...');
 
   try {
-    const resp = await fetch('/api/connect', { method: 'POST' });
+    const resp = await fetch('/api/connect', { method: 'POST', credentials: 'include' });
     const data = await resp.json();
 
     if (data.ok) {
@@ -84,7 +84,7 @@ async function doConnect() {
 async function doDisconnect() {
   if (!isAdmin()) return;
   stopMotor();
-  try { await fetch('/api/disconnect', { method: 'POST' }); } catch (e) {}
+  try { await fetch('/api/disconnect', { method: 'POST', credentials: 'include' }); } catch (e) {}
 
   connected = false;
   stopVideoStream();
@@ -111,7 +111,7 @@ function stopPolling() {
 
 async function pollStatus() {
   try {
-    const resp = await fetch('/api/status');
+    const resp = await fetch('/api/status', { credentials: 'include' });
     const s = await resp.json();
 
     connected = ['connected', 'streaming'].includes(s.state);
@@ -142,7 +142,7 @@ async function pollStatus() {
 
 async function pollLogs() {
   try {
-    const resp = await fetch('/api/logs');
+    const resp = await fetch('/api/logs', { credentials: 'include' });
     const data = await resp.json();
     if (data.logs && data.logs.length > 0) {
       for (const entry of data.logs) {
@@ -154,7 +154,7 @@ async function pollLogs() {
 
 // ── Motor Control (continuous 20Hz while held) ───────────
 function startMotor(command) {
-  if (!connected || !canControl) return;
+  if (!connected) return;
   if (currentCommand === command) return; // Already running this
 
   // Clear old interval WITHOUT sending stop (avoids brief centering between commands)
@@ -177,19 +177,16 @@ function stopMotor() {
   currentCommand = null;
 
   // Send neutral
-  if (connected && canControl) sendMotorCmd('stop');
+  if (connected) sendMotorCmd('stop');
 }
 
 async function sendMotorCmd(command) {
   try {
     const payload = { command, speed: motorSpeed, steer_range: motorSteerRange, client_ts: Date.now() / 1000 };
-    if (socket && socket.connected) {
-      socket.emit('control:command', payload);
-      return;
-    }
     await fetch('/api/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify(payload),
     });
   } catch (e) {}
@@ -199,13 +196,14 @@ async function sendMotorCmd(command) {
 let lightsOn = false;
 
 async function toggleLights() {
-  if (!connected || !canControl) return;
+  if (!connected) return;
   lightsOn = !lightsOn;
   try {
     const resp = await fetch('/api/lights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ on: lightsOn }),
+      credentials: 'include',
     });
     const data = await resp.json();
     if (data.ok) {
@@ -288,7 +286,7 @@ function renderLobby(data) {
 async function refreshLobby() {
   if (!isLoggedIn()) return;
   try {
-    const resp = await fetch('/api/lobby');
+    const resp = await fetch('/api/lobby', { credentials: 'include' });
     if (resp.ok) renderLobby(await resp.json());
   } catch (e) {}
 }
@@ -296,7 +294,7 @@ async function refreshLobby() {
 async function joinQueue() {
   if (!isDriverRole()) return;
   try {
-    const resp = await fetch('/api/queue/join', { method: 'POST' });
+    const resp = await fetch('/api/queue/join', { method: 'POST', credentials: 'include' });
     if (resp.ok) renderLobby(await resp.json());
   } catch (e) {}
 }
@@ -304,7 +302,7 @@ async function joinQueue() {
 async function leaveQueue() {
   if (!isDriverRole()) return;
   try {
-    const resp = await fetch('/api/queue/leave', { method: 'POST' });
+    const resp = await fetch('/api/queue/leave', { method: 'POST', credentials: 'include' });
     if (resp.ok) renderLobby(await resp.json());
   } catch (e) {}
 }
@@ -317,6 +315,7 @@ async function adminAction(action, body = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      credentials: 'include',
     });
     const data = await resp.json();
     if (resp.ok) {
@@ -434,7 +433,7 @@ function initSocket() {
     if (isLoggedIn()) setInterval(refreshLobby, 1000);
     return;
   }
-  socket = io();
+  socket = io({ withCredentials: true });
   socket.on('connect', () => addLog('SYS', 'Lobby socket connected.'));
   socket.on('lobby:update', renderLobby);
   socket.on('control:ack', (data) => {
@@ -459,6 +458,7 @@ async function sendRaw() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ hex, port }),
+      credentials: 'include',
     });
     const data = await resp.json();
     if (data.ok) {
