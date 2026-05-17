@@ -200,7 +200,7 @@ async function sendRaw() {
 let gamepadActive = false;
 let gamepadPoller = null;
 let gpBtnPrev = {};  // Previous button states for edge detection
-let selectedGamepadId = 'auto';  // 'auto' or gamepad.id string
+let selectedGamepadId = 'none';  // 'none' = keyboard only, or gamepad.id string
 let gpProfileCache = {};  // Cache detected profiles by gamepad.id
 
 const DEADZONE = 0.15;
@@ -242,7 +242,7 @@ function refreshGamepadList() {
   const current = select.value;
 
   // Preserve selection, rebuild options
-  select.innerHTML = '<option value="auto">🎮 Auto-detect</option>';
+  select.innerHTML = '<option value="none">⌨️ Keyboard</option>';
 
   let anyConnected = false;
   let hasPedals = false;
@@ -290,24 +290,26 @@ function refreshGamepadList() {
 function onGamepadSelectChange() {
   const select = $('gamepadSelect');
   selectedGamepadId = select.value;
-  addLog('SYS', '🎮 Controller: ' + (selectedGamepadId === 'auto' ? 'Auto-detect' : selectedGamepadId.substring(0, 40)));
+  if (selectedGamepadId === 'none') {
+    addLog('SYS', '⌨️ Keyboard controls active');
+    if (gamepadActive) { gamepadActive = false; stopMotor(); restoreSliders(); }
+  } else {
+    addLog('SYS', '🎮 Controller: ' + selectedGamepadId.substring(0, 40));
+  }
 }
 
 function getSelectedGamepad() {
+  if (selectedGamepadId === 'none') return null;  // Keyboard only
+
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  if (selectedGamepadId === 'auto') {
-    // Smart auto: if both Moza pedals + wheel exist, combine them
-    const pedals = Array.from(pads).find(p => p && detectProfile(p) === 'moza-pedals');
-    const wheel = Array.from(pads).find(p => p && detectProfile(p) === 'moza-wheel');
-    if (pedals && wheel) return { _combined: true, pedals, wheel };
-    return Array.from(pads).find(p => p !== null) || null;
-  }
+
   if (selectedGamepadId === 'combined-moza') {
     const pedals = Array.from(pads).find(p => p && detectProfile(p) === 'moza-pedals');
     const wheel = Array.from(pads).find(p => p && detectProfile(p) === 'moza-wheel');
     if (!pedals && !wheel) return null;
     return { _combined: true, pedals, wheel };
   }
+
   return Array.from(pads).find(p => p && p.id === selectedGamepadId) || null;
 }
 
