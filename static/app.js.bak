@@ -11,7 +11,7 @@ let currentCommand = null;  // Currently held command
 let motorSpeed = 100;       // Throttle power 0-100%
 let motorSteerRange = 100;  // Steering angle 0-100%
 let lobbyState = null;
-let canControl = true; // Default true; lobby system refines this when socket.io works
+let canControl = false;
 let socket = null;
 const userRole = document.body.dataset.userRole || 'guest';
 const userId = document.body.dataset.userId || '';
@@ -55,7 +55,7 @@ async function doConnect() {
   setStatus('connecting', 'CONNECTING...');
 
   try {
-    const resp = await fetch('/api/connect', { method: 'POST', credentials: 'include' });
+    const resp = await fetch('/api/connect', { method: 'POST' });
     const data = await resp.json();
 
     if (data.ok) {
@@ -84,7 +84,7 @@ async function doConnect() {
 async function doDisconnect() {
   if (!isAdmin()) return;
   stopMotor();
-  try { await fetch('/api/disconnect', { method: 'POST', credentials: 'include' }); } catch (e) {}
+  try { await fetch('/api/disconnect', { method: 'POST' }); } catch (e) {}
 
   connected = false;
   stopVideoStream();
@@ -111,7 +111,7 @@ function stopPolling() {
 
 async function pollStatus() {
   try {
-    const resp = await fetch('/api/status', { credentials: 'include' });
+    const resp = await fetch('/api/status');
     const s = await resp.json();
 
     connected = ['connected', 'streaming'].includes(s.state);
@@ -142,7 +142,7 @@ async function pollStatus() {
 
 async function pollLogs() {
   try {
-    const resp = await fetch('/api/logs', { credentials: 'include' });
+    const resp = await fetch('/api/logs');
     const data = await resp.json();
     if (data.logs && data.logs.length > 0) {
       for (const entry of data.logs) {
@@ -154,7 +154,7 @@ async function pollLogs() {
 
 // ── Motor Control (continuous 20Hz while held) ───────────
 function startMotor(command) {
-  if (!connected) return;
+  if (!connected || !canControl) return;
   if (currentCommand === command) return; // Already running this
 
   // Clear old interval WITHOUT sending stop (avoids brief centering between commands)
@@ -177,16 +177,19 @@ function stopMotor() {
   currentCommand = null;
 
   // Send neutral
-  if (connected) sendMotorCmd('stop');
+  if (connected && canControl) sendMotorCmd('stop');
 }
 
 async function sendMotorCmd(command) {
   try {
     const payload = { command, speed: motorSpeed, steer_range: motorSteerRange, client_ts: Date.now() / 1000 };
+    if (socket && socket.connected) {
+      socket.emit('control:command', payload);
+      return;
+    }
     await fetch('/api/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
       body: JSON.stringify(payload),
     });
   } catch (e) {}
@@ -196,14 +199,13 @@ async function sendMotorCmd(command) {
 let lightsOn = false;
 
 async function toggleLights() {
-  if (!connected) return;
+  if (!connected || !canControl) return;
   lightsOn = !lightsOn;
   try {
     const resp = await fetch('/api/lights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ on: lightsOn }),
-      credentials: 'include',
     });
     const data = await resp.json();
     if (data.ok) {
@@ -286,7 +288,7 @@ function renderLobby(data) {
 async function refreshLobby() {
   if (!isLoggedIn()) return;
   try {
-    const resp = await fetch('/api/lobby', { credentials: 'include' });
+    const resp = await fetch('/api/lobby');
     if (resp.ok) renderLobby(await resp.json());
   } catch (e) {}
 }
@@ -294,7 +296,7 @@ async function refreshLobby() {
 async function joinQueue() {
   if (!isDriverRole()) return;
   try {
-    const resp = await fetch('/api/queue/join', { method: 'POST', credentials: 'include' });
+    const resp = await fetch('/api/queue/join', { method: 'POST' });
     if (resp.ok) renderLobby(await resp.json());
   } catch (e) {}
 }
@@ -302,7 +304,7 @@ async function joinQueue() {
 async function leaveQueue() {
   if (!isDriverRole()) return;
   try {
-    const resp = await fetch('/api/queue/leave', { method: 'POST', credentials: 'include' });
+    const resp = await fetch('/api/queue/leave', { method: 'POST' });
     if (resp.ok) renderLobby(await resp.json());
   } catch (e) {}
 }
@@ -315,7 +317,6 @@ async function adminAction(action, body = {}) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-      credentials: 'include',
     });
     const data = await resp.json();
     if (resp.ok) {
@@ -433,7 +434,7 @@ function initSocket() {
     if (isLoggedIn()) setInterval(refreshLobby, 1000);
     return;
   }
-  socket = io({ withCredentials: true });
+  socket = io();
   socket.on('connect', () => addLog('SYS', 'Lobby socket connected.'));
   socket.on('lobby:update', renderLobby);
   socket.on('control:ack', (data) => {
@@ -458,7 +459,6 @@ async function sendRaw() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ hex, port }),
-      credentials: 'include',
     });
     const data = await resp.json();
     if (data.ok) {
@@ -1115,179 +1115,11 @@ function initSliders() {
   }
 }
 
-// ── Guest Code Functions ──────────────────────────────────
-async function redeemCode() {
-  const input = $('guestCodeInput');
-  if (!input) return;
-  const code = input.value.trim();
-  if (!code) {
-    addLog('ERR', 'Please enter a drive code.');
-    return;
-  }
-  try {
-    const resp = await fetch('/api/redeem-code', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ code }),
-    });
-    const data = await resp.json();
-    if (data.ok) {
-      addLog('SYS', '✅ Code redeemed! Reloading...');
-      setTimeout(() => location.reload(), 500);
-    } else {
-      addLog('ERR', 'Code error: ' + (data.error || 'invalid'));
-      input.value = '';
-    }
-  } catch (e) {
-    addLog('ERR', 'Network error: ' + e.message);
-  }
-}
-
-// Allow Enter key to redeem
-document.addEventListener('DOMContentLoaded', () => {
-  const codeInput = $('guestCodeInput');
-  if (codeInput) {
-    codeInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        redeemCode();
-      }
-    });
-  }
-});
-
-// Guest timer countdown
-let guestTimerInterval = null;
-function initGuestTimer() {
-  const timerEl = $('guestTimeLeft');
-  if (!timerEl || !document.body.dataset.userId?.startsWith('guest-')) return;
-  
-  async function updateGuestTimer() {
-    try {
-      const resp = await fetch('/api/guest/remaining', { credentials: 'include' });
-      const data = await resp.json();
-      if (data.ok) {
-        const mins = Math.floor(data.remaining / 60);
-        const secs = data.remaining % 60;
-        timerEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-        if (data.remaining <= 30) {
-          timerEl.style.color = 'var(--red)';
-        } else if (data.remaining <= 60) {
-          timerEl.style.color = 'var(--yellow)';
-        }
-        if (data.remaining <= 0) {
-          clearInterval(guestTimerInterval);
-          addLog('SYS', '⏱️ Drive time expired!');
-          stopMotor();
-        }
-      }
-    } catch (e) {}
-  }
-  
-  updateGuestTimer();
-  guestTimerInterval = setInterval(updateGuestTimer, 1000);
-}
-
-// Admin: Generate guest code
-async function generateGuestCode() {
-  const durationEl = $('guestDuration');
-  const duration = durationEl ? parseInt(durationEl.value) : 10;
-  try {
-    const resp = await fetch('/api/guest/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ duration_minutes: duration }),
-    });
-    const data = await resp.json();
-    if (data.ok) {
-      const codeBox = $('generatedCodeBox');
-      const codeEl = $('generatedCode');
-      if (codeBox && codeEl) {
-        codeEl.textContent = data.code;
-        codeBox.style.display = 'block';
-      }
-      addLog('SYS', '🎟️ Code generated: ' + data.code);
-      refreshGuestCodes();
-    } else {
-      addLog('ERR', 'Code generation failed: ' + (data.error || 'unknown'));
-    }
-  } catch (e) {
-    addLog('ERR', 'Network error: ' + e.message);
-  }
-}
-
-function copyCode() {
-  const codeEl = $('generatedCode');
-  if (codeEl) {
-    navigator.clipboard.writeText(codeEl.textContent).then(() => {
-      addLog('SYS', '📋 Code copied to clipboard');
-    }).catch(() => {
-      // Fallback for older browsers
-      const textarea = document.createElement('textarea');
-      textarea.value = codeEl.textContent;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textarea);
-      addLog('SYS', '📋 Code copied to clipboard');
-    });
-  }
-}
-
-// Admin: Refresh guest code list
-async function refreshGuestCodes() {
-  if (!isAdmin()) return;
-  try {
-    const resp = await fetch('/api/guest/codes', { credentials: 'include' });
-    const data = await resp.json();
-    if (data.ok) {
-      const list = $('guestCodeList');
-      if (!list) return;
-      if (data.codes.length === 0) {
-        list.innerHTML = '<div class="dim-item">No codes generated yet</div>';
-        return;
-      }
-      list.innerHTML = data.codes.map(c => {
-        const status = c.active ? '🟢 Active' : (c.expired ? '🔴 Expired' : '🟡 Used');
-        const remaining = c.active ? `${Math.floor(c.remaining/60)}m ${c.remaining%60}s` : '';
-        return `<div class="guest-code-row">
-          <span class="guest-code-text">${c.code}</span>
-          <span class="guest-code-status">${status} ${remaining}</span>
-          ${c.active ? `<button class="btn btn-red btn-small" onclick="revokeCode('${c.code}')">REVOKE</button>` : ''}
-        </div>`;
-      }).join('');
-    }
-  } catch (e) {}
-}
-
-// Admin: Revoke a guest code
-async function revokeCode(code) {
-  try {
-    const resp = await fetch('/api/guest/revoke', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ code }),
-    });
-    const data = await resp.json();
-    if (data.ok) {
-      addLog('SYS', '🚫 Code revoked: ' + code);
-      refreshGuestCodes();
-    }
-  } catch (e) {}
-}
-
 // ── Init ─────────────────────────────────────────────────
 initSliders();
 updateRoleUi();
 initSocket();
-initGuestTimer();
-if (isLoggedIn()) {
-  startPolling();
-  if (isAdmin()) refreshGuestCodes();
-}
+if (isLoggedIn()) startPolling();
 addLog('SYS', '🏎️ FPV Debug Cockpit loaded.');
 addLog('SYS', 'Car: WL_FPV_CAR_99613492 @ 172.16.11.1');
 addLog('SYS', 'Codec: H.264 Baseline 640×360 @ 20fps');

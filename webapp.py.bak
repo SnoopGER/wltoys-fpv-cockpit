@@ -65,12 +65,6 @@ decoder = None
 state_lock = threading.RLock()
 timer_started = False
 
-# Guest Drive Codes: {code: {"created": time, "expires_at": time, "duration": int, "redeemed_by": str|None, "active": bool}}
-guest_codes = {}
-guest_codes_lock = threading.Lock()
-# Active guest sessions: {guest_user_id: {"code": str, "expires_at": time}}
-active_guest_sessions = {}
-
 DISCORD_API = "https://discord.com/api"
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://race.zen-rc.net").rstrip("/")
 COMMANDS = {
@@ -255,25 +249,15 @@ def current_user():
         return None
     if not user:
         return None
-    # Guest users: check if session still valid
-    if session.get("is_guest"):
-        guest_id = user.get("id", "")
-        with guest_codes_lock:
-            info = active_guest_sessions.get(guest_id)
-            if not info or time.time() > info["expires_at"]:
-                session.clear()
-                return None
-        user = dict(user)
-        return user
     if is_banned_user(user["id"]):
         session.clear()
         return None
     if not is_allowed_user(user["id"]):
-        session.clear()
         return None
     user = dict(user)
     user["role"] = role_for_user(user["id"])
     return user
+
 
 def is_banned_user(user_id):
     return user_id in lobby.get("banned_ids", set())
@@ -295,98 +279,6 @@ def can_drive(user):
 
 def is_admin(user):
     return bool(user and user["role"] == "admin")
-
-
-def generate_guest_code(duration_minutes=10):
-    """Generate a random drive code like DRIVE-AX7K-M9P2."""
-    import random
-    import string
-    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # No ambiguous chars
-    while True:
-        part1 = ''.join(random.choices(chars, k=4))
-        part2 = ''.join(random.choices(chars, k=4))
-        code = f"DRIVE-{part1}-{part2}"
-        with guest_codes_lock:
-            if code not in guest_codes:
-                break
-    now = time.time()
-    with guest_codes_lock:
-        guest_codes[code] = {
-            "created": now,
-            "expires_at": now + (duration_minutes * 60),
-            "duration": duration_minutes * 60,
-            "redeemed_by": None,
-            "active": True,
-        }
-    return code
-
-
-def redeem_guest_code(code):
-    """Redeem a drive code. Returns (user_dict, error_msg) or (user, None)."""
-    code = code.strip().upper()
-    with guest_codes_lock:
-        entry = guest_codes.get(code)
-        if not entry:
-            return None, "Invalid code."
-        if not entry["active"]:
-            return None, "Code already used."
-        if time.time() > entry["expires_at"]:
-            entry["active"] = False
-            return None, "Code expired."
-        # Mark as redeemed
-        entry["active"] = False
-        entry["redeemed_by"] = "guest"
-        # Generate guest user
-        guest_id = f"guest-{code}"
-        remaining = int(entry["expires_at"] - time.time())
-        user = {
-            "id": guest_id,
-            "username": f"Guest-{code[-4:]}",
-            "display_name": f"Guest Driver ({code[-4:]})",
-            "avatar": None,
-            "role": "driver",
-            "is_guest": True,
-            "guest_expires_at": entry["expires_at"],
-            "guest_code": code,
-        }
-        # Track active guest session
-        active_guest_sessions[guest_id] = {
-            "code": code,
-            "expires_at": entry["expires_at"],
-        }
-        return user, None
-
-
-def expire_guest_sessions():
-    """Check and expire guest sessions. Called from timer_loop."""
-    now = time.time()
-    expired = []
-    with guest_codes_lock:
-        for guest_id, info in list(active_guest_sessions.items()):
-            if now > info["expires_at"]:
-                expired.append(guest_id)
-                del active_guest_sessions[guest_id]
-    for guest_id in expired:
-        kick_user(guest_id, "Drive code expired")
-
-
-def get_active_codes():
-    """Return list of active/redeemed codes for admin view."""
-    now = time.time()
-    result = []
-    with guest_codes_lock:
-        for code, entry in guest_codes.items():
-            remaining = max(0, int(entry["expires_at"] - now))
-            result.append({
-                "code": code,
-                "created": entry["created"],
-                "duration": entry["duration"],
-                "remaining": remaining,
-                "redeemed_by": entry["redeemed_by"],
-                "active": entry["active"],
-                "expired": now > entry["expires_at"],
-            })
-    return sorted(result, key=lambda x: x["created"], reverse=True)
 
 
 def require_user():
@@ -445,13 +337,9 @@ def lobby_snapshot():
         users = [public_user(u) for u in lobby["users"].values()]
         banned = sorted(lobby.get("banned_ids", set()))
         active_id = lobby["active_driver"]
-        try:
-            me = public_user(current_user())
-        except Exception:
-            me = None
         return {
             "ok": True,
-            "me": me,
+            "me": public_user(current_user()),
             "paused": lobby["paused"],
             "emergency_stop": lobby["emergency_stop"],
             "active_driver": public_user(lobby["users"].get(active_id)) if active_id else None,
@@ -582,8 +470,6 @@ def timer_loop():
         time.sleep(1)
         changed = False
         should_broadcast = False
-        # Expire guest sessions
-        expire_guest_sessions()
         with state_lock:
             if lobby["active_driver"] and not lobby["paused"]:
                 changed = advance_driver_if_due_locked("driver timer expired")
@@ -611,11 +497,27 @@ def clamp_int(value, default, min_value, max_value):
 def handle_control_command(user, data):
     init_car()
     with state_lock:
+        if lobby["paused"]:
+            return {"ok": False, "error": "race_paused"}
+        if lobby["emergency_stop"]:
+            return {"ok": False, "error": "emergency_stop_active"}
+        if not validate_control_user(user):
+            return {"ok": False, "error": "not_active_driver"}
+
         cmd = data.get("command", "stop")
         if cmd not in COMMANDS:
             return {"ok": False, "error": "invalid_command"}
 
-        max_speed = clamp_int(lobby.get("max_speed_percent", 100), MAX_REMOTE_SPEED_PERCENT, 5, 100)
+        client_ts = data.get("client_ts")
+        if client_ts is not None:
+            try:
+                age = abs(time.time() - float(client_ts))
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "invalid_timestamp"}
+            if age > 1.0:
+                return {"ok": False, "error": "stale_command"}
+
+        max_speed = clamp_int(lobby["max_speed_percent"], MAX_REMOTE_SPEED_PERCENT, 5, 100)
         speed = clamp_int(data.get("speed", 100), 100, 0, 100)
         steer_range = clamp_int(data.get("steer_range", 100), 100, 0, 100)
         speed = min(speed, max_speed)
@@ -825,77 +727,6 @@ def api_admin(action):
     return jsonify(lobby_snapshot())
 
 
-@app.route("/api/guest/generate", methods=["POST"])
-def api_guest_generate():
-    """Admin: generate a drive code."""
-    user, error = require_admin()
-    if error:
-        return error
-    data = request.get_json(silent=True) or {}
-    duration = data.get("duration_minutes", 10)
-    try:
-        duration = int(duration)
-        duration = max(1, min(duration, 120))  # 1 min to 2 hours
-    except (TypeError, ValueError):
-        duration = 10
-    code = generate_guest_code(duration)
-    return jsonify({"ok": True, "code": code, "duration_minutes": duration})
-
-
-@app.route("/api/guest/codes", methods=["GET"])
-def api_guest_codes():
-    """Admin: list all guest codes."""
-    user, error = require_admin()
-    if error:
-        return error
-    return jsonify({"ok": True, "codes": get_active_codes()})
-
-
-@app.route("/api/guest/revoke", methods=["POST"])
-def api_guest_revoke():
-    """Admin: revoke a guest code."""
-    user, error = require_admin()
-    if error:
-        return error
-    data = request.get_json(silent=True) or {}
-    code = data.get("code", "").strip().upper()
-    with guest_codes_lock:
-        if code in guest_codes:
-            guest_codes[code]["active"] = False
-            return jsonify({"ok": True})
-    return jsonify({"ok": False, "error": "code_not_found"}), 404
-
-
-@app.route("/api/redeem-code", methods=["POST"])
-def api_redeem_code():
-    """Guest: redeem a drive code to get driver access."""
-    data = request.get_json(silent=True) or {}
-    code = data.get("code", "").strip()
-    if not code:
-        return jsonify({"ok": False, "error": "no_code_provided"}), 400
-    user, error = redeem_guest_code(code)
-    if error:
-        return jsonify({"ok": False, "error": error}), 403
-    session["user"] = user
-    session["is_guest"] = True
-    return jsonify({"ok": True, "user": public_user(user), "expires_at": user["guest_expires_at"]})
-
-
-@app.route("/api/guest/remaining", methods=["GET"])
-def api_guest_remaining():
-    """Get remaining time for current guest session."""
-    user = current_user()
-    if not user or not user.get("is_guest"):
-        return jsonify({"ok": False, "error": "not_guest"})
-    guest_id = user["id"]
-    with guest_codes_lock:
-        info = active_guest_sessions.get(guest_id)
-        if not info:
-            return jsonify({"ok": True, "remaining": 0, "expired": True})
-        remaining = max(0, int(info["expires_at"] - time.time()))
-        return jsonify({"ok": True, "remaining": remaining, "expired": remaining <= 0})
-
-
 @app.route("/api/connect", methods=["POST"])
 def api_connect():
     user, error = require_admin()
@@ -925,6 +756,9 @@ def api_disconnect():
 
 @app.route("/api/status")
 def api_status():
+    user, error = require_user()
+    if error:
+        return error
     init_car()
     status = car.get_status()
     status["decoder_frames"] = decoder.frame_count if decoder else 0
@@ -1096,17 +930,6 @@ def ws_control_command(data):
 
 if __name__ == "__main__":
     ensure_timer()
-    # Auto-connect to car on startup
-    init_car()
-    try:
-        success = car.connect()
-        if success:
-            decoder.start()
-            print(f"  Car connected: {car.state.value}")
-        else:
-            print(f"  Car connection failed: {car.state.value}")
-    except Exception as e:
-        print(f"  Car connect error: {e}")
     print("=" * 60)
     print("  WLtoys FPV Car - Race Lobby Cockpit")
     print("  http://localhost:5555")

@@ -668,6 +668,87 @@ main {
   color: var(--text);
 }
 
+/* ── Guest Code UI ──────────────────────────────────────── */
+.guest-code-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.guest-code-input {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 4px;
+  width: 140px;
+  text-align: center;
+}
+.guest-code-input::placeholder {
+  color: var(--dim);
+  font-size: 10px;
+}
+.guest-code-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.auth-divider {
+  color: var(--dim);
+  margin: 0 6px;
+}
+.guest-timer {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 600;
+}
+.generated-code {
+  display: inline-block;
+  background: var(--bg);
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-family: var(--font);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent);
+  margin-right: 8px;
+}
+.guest-code-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.guest-code-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+.guest-code-text {
+  font-family: var(--font);
+  font-weight: 600;
+  color: var(--accent2);
+  letter-spacing: 1px;
+}
+.guest-code-status {
+  color: var(--dim);
+  flex: 1;
+}
+.guest-code-row .btn-small {
+  padding: 2px 6px;
+  font-size: 9px;
+}
+
 /* ── Scrollbar ─────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }

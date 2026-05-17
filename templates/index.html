@@ -17,6 +17,9 @@
       {% if user %}
         <span id="userName">{{ user.display_name }}</span>
         <span class="role-badge" id="userRole">{{ user.role }}</span>
+        {% if user.is_guest %}
+          <span class="guest-timer" id="guestTimer" title="Drive time remaining">⏱️ <span id="guestTimeLeft">--:--</span></span>
+        {% endif %}
         <a href="/logout">LOGOUT</a>
       {% else %}
         {% if discord_configured %}
@@ -24,6 +27,11 @@
         {% else %}
           <span>DISCORD OAUTH NOT CONFIGURED</span>
         {% endif %}
+        <span class="auth-divider">|</span>
+        <div class="guest-code-box">
+          <input type="text" id="guestCodeInput" placeholder="DRIVE-XXXX-XXXX" class="guest-code-input" maxlength="14" autocomplete="off">
+          <button class="btn btn-green btn-small" id="btnRedeemCode" onclick="redeemCode()">GO</button>
+        </div>
       {% endif %}
     </div>
     <div class="gamepad-pill" id="gamepadPill" title="Gamepad status">
@@ -134,6 +142,24 @@
         <input type="text" id="adminBanId" placeholder="Discord ID to ban/unban" class="hex-input">
         <button class="btn btn-red" onclick="banDiscordIdInput()">BAN ID</button>
         <button class="btn btn-blue" onclick="unbanDiscordIdInput()">UNBAN ID</button>
+      </div>
+    </div>
+
+    <!-- Guest Code Management -->
+    <div class="panel control-panel admin-panel">
+      <div class="panel-header">🎟️ GUEST CODES</div>
+      <div class="button-row">
+        <input type="number" id="guestDuration" min="1" max="120" value="10" class="number-input" style="width:60px">
+        <span class="dim">min</span>
+        <button class="btn btn-green" onclick="generateGuestCode()">GENERATE CODE</button>
+      </div>
+      <div id="generatedCodeBox" style="display:none; margin:8px 0;">
+        <div class="generated-code" id="generatedCode"></div>
+        <button class="btn btn-small" onclick="copyCode()">📋 COPY</button>
+      </div>
+      <div class="queue-title" style="margin-top:10px;">Active Codes</div>
+      <div id="guestCodeList" class="guest-code-list">
+        <div class="dim-item">No codes generated yet</div>
       </div>
     </div>
     {% endif %}
