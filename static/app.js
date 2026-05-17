@@ -184,6 +184,8 @@ async function toggleLights() {
     const data = await resp.json();
     if (data.ok) {
       addLog('TX', '💡 Lights ' + (lightsOn ? 'ON' : 'OFF'));
+      const btn = $('btnLights');
+      if (btn) btn.textContent = lightsOn ? '💡 LIGHTS ON' : '💡 LIGHTS';
     } else {
       addLog('ERR', 'Lights toggle failed: ' + (data.error || 'unknown'));
       lightsOn = !lightsOn;  // Revert on failure
