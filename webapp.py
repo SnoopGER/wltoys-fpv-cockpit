@@ -1,29 +1,103 @@
 #!/usr/bin/env python3
 """
 WLtoys FPV Car - Debug Cockpit Web Server
-Flask app providing REST API + MJPEG video stream + real-time logs.
+Flask app providing REST API + MJPEG video stream + lobby auth/control.
 """
 
-import json
-import time
 import os
 import sys
-import signal
+import time
 import threading
-from flask import Flask, render_template, Response, jsonify, request, send_from_directory
+from urllib.parse import urlencode
+
+import requests
+from flask import Flask, Response, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from flask_socketio import SocketIO, emit, join_room, leave_room
 
 # Add current directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from car_protocol import CarProtocol, ConnectionState, SPS_PPS
+from car_protocol import HANDSHAKE_WAKE, HANDSHAKE_TRIGGER, HEARTBEAT
 from video_decoder import VideoDecoder
 
-app = Flask(__name__, template_folder='templates', static_folder='static')
+app = Flask(__name__, template_folder="templates", static_folder="static")
+app.secret_key = os.environ.get("SESSION_SECRET", os.urandom(32))
+socketio = SocketIO(app, async_mode="threading", manage_session=False)
 
-# ── Global State ───────────────────────────────────────────────────────
+# Global State
 
 car = None
 decoder = None
+state_lock = threading.RLock()
+timer_started = False
+
+DISCORD_API = "https://discord.com/api"
+COMMANDS = {
+    "stop",
+    "forward",
+    "reverse",
+    "left",
+    "right",
+    "forward_left",
+    "forward_right",
+    "reverse_left",
+    "reverse_right",
+}
+
+
+def csv_ids(name):
+    return {item.strip() for item in os.environ.get(name, "").split(",") if item.strip()}
+
+
+def csv_role_map(name):
+    roles = {}
+    for item in os.environ.get(name, "").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" in item:
+            user_id, role = item.split(":", 1)
+            role = role.strip().lower()
+            if role not in {"driver", "spectator"}:
+                role = "driver"
+            roles[user_id.strip()] = role
+        else:
+            roles[item] = "driver"
+    return roles
+
+
+def env_int(name, default, min_value=None, max_value=None):
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    if min_value is not None:
+        value = max(min_value, value)
+    if max_value is not None:
+        value = min(max_value, value)
+    return value
+
+
+ADMIN_IDS = csv_ids("ADMIN_DISCORD_IDS")
+ALLOWED_ROLES = csv_role_map("ALLOWED_DISCORD_IDS")
+ALLOWED_IDS = set(ALLOWED_ROLES)
+DEFAULT_DRIVE_SECONDS = env_int("DEFAULT_DRIVE_SECONDS", 120, 15, 3600)
+MAX_REMOTE_SPEED_PERCENT = env_int("MAX_REMOTE_SPEED_PERCENT", 70, 5, 100)
+
+lobby = {
+    "paused": False,
+    "emergency_stop": False,
+    "max_speed_percent": MAX_REMOTE_SPEED_PERCENT,
+    "session_duration": DEFAULT_DRIVE_SECONDS,
+    "active_driver": None,
+    "driver_started_at": None,
+    "queue": [],
+    "users": {},
+    "sid_to_user": {},
+    "user_sids": {},
+}
+
 
 def init_car():
     global car, decoder
@@ -35,95 +109,478 @@ def init_car():
         )
     if decoder is None:
         decoder = VideoDecoder(width=640, height=360, quality=75)
-    
-    # Wire up frame delivery: car → decoder
+
     car.on_frame = lambda data: decoder.feed_frame(data)
 
-# ── HTML Routes ────────────────────────────────────────────────────────
 
-@app.route('/')
+def current_user():
+    user = session.get("user")
+    if not user:
+        return None
+    if not is_allowed_user(user["id"]):
+        return None
+    user = dict(user)
+    user["role"] = role_for_user(user["id"])
+    return user
+
+
+def is_allowed_user(user_id):
+    return user_id in ADMIN_IDS or user_id in ALLOWED_ROLES
+
+
+def role_for_user(user_id):
+    if user_id in ADMIN_IDS:
+        return "admin"
+    return ALLOWED_ROLES.get(user_id)
+
+
+def can_drive(user):
+    return bool(user and user["role"] in {"admin", "driver"})
+
+
+def is_admin(user):
+    return bool(user and user["role"] == "admin")
+
+
+def require_user():
+    user = current_user()
+    if not user:
+        return None, (jsonify({"ok": False, "error": "login_required"}), 401)
+    return user, None
+
+
+def require_admin():
+    user, error = require_user()
+    if error:
+        return None, error
+    if not is_admin(user):
+        return None, (jsonify({"ok": False, "error": "admin_required"}), 403)
+    return user, None
+
+
+def public_user(user):
+    if not user:
+        return None
+    return {
+        "id": user["id"],
+        "username": user.get("username", "unknown"),
+        "display_name": user.get("display_name") or user.get("username", "unknown"),
+        "avatar": user.get("avatar"),
+        "role": role_for_user(user["id"]),
+    }
+
+
+def seconds_remaining(now=None):
+    now = now or time.time()
+    active = lobby["active_driver"]
+    if not active or not lobby["driver_started_at"]:
+        return 0
+    if lobby["paused"]:
+        return max(0, int(lobby.get("paused_remaining", lobby["session_duration"])))
+    elapsed = now - lobby["driver_started_at"]
+    return max(0, int(lobby["session_duration"] - elapsed))
+
+
+def car_online():
+    if not car:
+        return False
+    return car.state in {ConnectionState.CONNECTED, ConnectionState.STREAMING}
+
+
+def lobby_snapshot():
+    init_car()
+    with state_lock:
+        users = [public_user(u) for u in lobby["users"].values()]
+        active_id = lobby["active_driver"]
+        return {
+            "ok": True,
+            "me": public_user(current_user()),
+            "paused": lobby["paused"],
+            "emergency_stop": lobby["emergency_stop"],
+            "active_driver": public_user(lobby["users"].get(active_id)) if active_id else None,
+            "remaining_drive_time": seconds_remaining(),
+            "queue": [public_user(lobby["users"].get(uid, {"id": uid, "username": uid})) for uid in lobby["queue"]],
+            "connected_spectators": [u for u in users if u and u["role"] == "spectator"],
+            "connected_users": users,
+            "car_online": car_online(),
+            "max_speed_percent": lobby["max_speed_percent"],
+            "session_duration": lobby["session_duration"],
+        }
+
+
+def broadcast_lobby():
+    socketio.emit("lobby:update", lobby_snapshot(), room="lobby")
+
+
+def send_neutral(reason):
+    init_car()
+    try:
+        car.send_command("stop", speed=0, steer_range=0)
+        if hasattr(car, "log"):
+            car.log("SAFETY", f"Neutral stop: {reason}")
+    except Exception as exc:
+        if car and hasattr(car, "log"):
+            car.log("ERROR", f"Neutral stop failed: {exc}")
+
+
+def remove_from_queue(user_id):
+    lobby["queue"] = [uid for uid in lobby["queue"] if uid != user_id]
+
+
+def start_driver(user_id):
+    remove_from_queue(user_id)
+    lobby["active_driver"] = user_id
+    lobby["driver_started_at"] = time.time()
+    lobby.pop("paused_remaining", None)
+    lobby["emergency_stop"] = False
+
+
+def next_driver_locked(reason):
+    if lobby["active_driver"]:
+        send_neutral(reason)
+    lobby["active_driver"] = None
+    lobby["driver_started_at"] = None
+    lobby.pop("paused_remaining", None)
+    while lobby["queue"]:
+        uid = lobby["queue"].pop(0)
+        user = lobby["users"].get(uid)
+        if user and can_drive(user):
+            start_driver(uid)
+            break
+
+
+def ensure_timer():
+    global timer_started
+    if timer_started:
+        return
+    timer_started = True
+    thread = threading.Thread(target=timer_loop, daemon=True)
+    thread.start()
+
+
+def timer_loop():
+    while True:
+        time.sleep(1)
+        changed = False
+        with state_lock:
+            if lobby["active_driver"] and not lobby["paused"] and seconds_remaining() <= 0:
+                next_driver_locked("driver timer expired")
+                changed = True
+        if changed:
+            broadcast_lobby()
+
+
+def validate_control_user(user):
+    active = lobby["active_driver"]
+    if is_admin(user):
+        return True
+    return bool(active and user["id"] == active and role_for_user(user["id"]) == "driver")
+
+
+def clamp_int(value, default, min_value, max_value):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        value = default
+    return max(min_value, min(max_value, value))
+
+
+def handle_control_command(user, data):
+    init_car()
+    with state_lock:
+        if lobby["paused"]:
+            return {"ok": False, "error": "race_paused"}
+        if lobby["emergency_stop"]:
+            return {"ok": False, "error": "emergency_stop_active"}
+        if not validate_control_user(user):
+            return {"ok": False, "error": "not_active_driver"}
+
+        cmd = data.get("command", "stop")
+        if cmd not in COMMANDS:
+            return {"ok": False, "error": "invalid_command"}
+
+        client_ts = data.get("client_ts")
+        if client_ts is not None:
+            try:
+                age = abs(time.time() - float(client_ts))
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "invalid_timestamp"}
+            if age > 1.0:
+                return {"ok": False, "error": "stale_command"}
+
+        max_speed = clamp_int(lobby["max_speed_percent"], MAX_REMOTE_SPEED_PERCENT, 5, 100)
+        speed = clamp_int(data.get("speed", 100), 100, 0, 100)
+        steer_range = clamp_int(data.get("steer_range", 100), 100, 0, 100)
+        speed = min(speed, max_speed)
+
+    success = car.send_command(cmd, speed=speed, steer_range=steer_range)
+    return {"ok": success, "command": cmd, "speed": speed, "steer_range": steer_range}
+
+
+def local_request():
+    return request.remote_addr in {"127.0.0.1", "::1", "localhost"}
+
+
+# HTML/Auth Routes
+
+@app.route("/")
 def index():
-    return render_template('index.html')
+    user = current_user()
+    return render_template(
+        "index.html",
+        user=public_user(user),
+        discord_configured=bool(os.environ.get("DISCORD_CLIENT_ID") and os.environ.get("DISCORD_CLIENT_SECRET")),
+        is_local=local_request(),
+    )
 
-@app.route('/static/<path:filename>')
+
+@app.route("/static/<path:filename>")
 def static_files(filename):
     return send_from_directory(app.static_folder, filename)
 
-# ── API Routes ────────────────────────────────────────────────────────
 
-@app.route('/api/connect', methods=['POST'])
+@app.route("/login")
+def login():
+    client_id = os.environ.get("DISCORD_CLIENT_ID")
+    redirect_uri = os.environ.get("DISCORD_REDIRECT_URI")
+    if not client_id or not os.environ.get("DISCORD_CLIENT_SECRET") or not redirect_uri:
+        return "Discord OAuth is not configured. Set DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, and DISCORD_REDIRECT_URI.", 503
+    params = urlencode({
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "identify",
+        "prompt": "none",
+    })
+    return redirect(f"{DISCORD_API}/oauth2/authorize?{params}")
+
+
+@app.route("/auth/discord/callback")
+def discord_callback():
+    code = request.args.get("code")
+    if not code:
+        return redirect(url_for("index"))
+
+    token_resp = requests.post(
+        f"{DISCORD_API}/oauth2/token",
+        data={
+            "client_id": os.environ.get("DISCORD_CLIENT_ID"),
+            "client_secret": os.environ.get("DISCORD_CLIENT_SECRET"),
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": os.environ.get("DISCORD_REDIRECT_URI"),
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=10,
+    )
+    token_resp.raise_for_status()
+    access_token = token_resp.json()["access_token"]
+    user_resp = requests.get(
+        f"{DISCORD_API}/users/@me",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    user_resp.raise_for_status()
+    discord_user = user_resp.json()
+    user = {
+        "id": discord_user["id"],
+        "username": discord_user.get("username", "unknown"),
+        "display_name": discord_user.get("global_name") or discord_user.get("username", "unknown"),
+        "avatar": discord_user.get("avatar"),
+    }
+    if not is_allowed_user(user["id"]):
+        session.clear()
+        return "This Discord account is not allowlisted for this cockpit.", 403
+    session["user"] = user
+    return redirect(url_for("index"))
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("index"))
+
+
+# API Routes
+
+@app.route("/api/me")
+def api_me():
+    return jsonify({"ok": True, "user": public_user(current_user())})
+
+
+@app.route("/api/lobby")
+def api_lobby():
+    return jsonify(lobby_snapshot())
+
+
+@app.route("/api/queue/join", methods=["POST"])
+def api_queue_join():
+    user, error = require_user()
+    if error:
+        return error
+    if not can_drive(user):
+        return jsonify({"ok": False, "error": "driver_role_required"}), 403
+    with state_lock:
+        lobby["users"][user["id"]] = user
+        if not lobby["active_driver"]:
+            start_driver(user["id"])
+        elif user["id"] != lobby["active_driver"] and user["id"] not in lobby["queue"]:
+            lobby["queue"].append(user["id"])
+    broadcast_lobby()
+    return jsonify(lobby_snapshot())
+
+
+@app.route("/api/queue/leave", methods=["POST"])
+def api_queue_leave():
+    user, error = require_user()
+    if error:
+        return error
+    with state_lock:
+        remove_from_queue(user["id"])
+    broadcast_lobby()
+    return jsonify(lobby_snapshot())
+
+
+@app.route("/api/admin/<action>", methods=["POST"])
+def api_admin(action):
+    user, error = require_admin()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    with state_lock:
+        if action == "emergency_stop":
+            lobby["emergency_stop"] = True
+            send_neutral("admin emergency stop")
+        elif action == "pause":
+            if not lobby["paused"]:
+                lobby["paused_remaining"] = seconds_remaining()
+                lobby["paused"] = True
+                send_neutral("race paused")
+        elif action == "resume":
+            if lobby["paused"]:
+                remaining = lobby.pop("paused_remaining", lobby["session_duration"])
+                lobby["driver_started_at"] = time.time() - max(0, lobby["session_duration"] - remaining)
+                lobby["paused"] = False
+                lobby["emergency_stop"] = False
+        elif action in {"next_driver", "kick_current_driver"}:
+            next_driver_locked(f"admin {action}")
+        elif action == "clear_queue":
+            lobby["queue"] = []
+        elif action == "set_max_speed":
+            lobby["max_speed_percent"] = clamp_int(data.get("value"), MAX_REMOTE_SPEED_PERCENT, 5, 100)
+        elif action == "set_session_duration":
+            lobby["session_duration"] = clamp_int(data.get("value"), DEFAULT_DRIVE_SECONDS, 15, 3600)
+            if lobby["active_driver"]:
+                lobby["driver_started_at"] = time.time()
+        else:
+            return jsonify({"ok": False, "error": "unknown_admin_action"}), 404
+    broadcast_lobby()
+    return jsonify(lobby_snapshot())
+
+
+@app.route("/api/connect", methods=["POST"])
 def api_connect():
+    user, error = require_admin()
+    if error:
+        return error
     init_car()
     success = car.connect()
     if success:
         decoder.start()
+    broadcast_lobby()
     return jsonify({"ok": success, "state": car.state.value})
 
-@app.route('/api/disconnect', methods=['POST'])
+
+@app.route("/api/disconnect", methods=["POST"])
 def api_disconnect():
+    user, error = require_admin()
+    if error:
+        return error
     global car, decoder
     if decoder:
         decoder.stop()
     if car:
         car.disconnect()
+    broadcast_lobby()
     return jsonify({"ok": True, "state": "disconnected"})
 
-@app.route('/api/status')
+
+@app.route("/api/status")
 def api_status():
+    user, error = require_user()
+    if error:
+        return error
     init_car()
     status = car.get_status()
-    status['decoder_frames'] = decoder.frame_count if decoder else 0
+    status["decoder_frames"] = decoder.frame_count if decoder else 0
     return jsonify(status)
 
-@app.route('/api/logs')
+
+@app.route("/api/logs")
 def api_logs():
+    user, error = require_user()
+    if error:
+        return error
     init_car()
     logs = car.get_logs()
     return jsonify({"logs": logs})
 
-@app.route('/api/command', methods=['POST'])
-def api_command():
-    """Send a command to the car. Body: {"command": "...", "speed": 100, "steer_range": 100}"""
-    init_car()
-    data = request.get_json(silent=True) or {}
-    cmd = data.get('command', 'stop')
-    speed = data.get('speed', 100)
-    steer_range = data.get('steer_range', 100)
-    success = car.send_command(cmd, speed=speed, steer_range=steer_range)
-    return jsonify({"ok": success, "command": cmd, "speed": speed, "steer_range": steer_range})
 
-@app.route('/api/lights', methods=['POST'])
+@app.route("/api/command", methods=["POST"])
+def api_command():
+    user, error = require_user()
+    if error:
+        return error
+    result = handle_control_command(user, request.get_json(silent=True) or {})
+    status = 200 if result.get("ok") else 403
+    return jsonify(result), status
+
+
+@app.route("/api/lights", methods=["POST"])
 def api_lights():
-    """Toggle car lights. Body: {"on": true}"""
+    user, error = require_user()
+    if error:
+        return error
+    with state_lock:
+        if not validate_control_user(user):
+            return jsonify({"ok": False, "error": "not_active_driver"}), 403
     init_car()
     data = request.get_json(silent=True) or {}
-    on = data.get('on', True)
+    on = bool(data.get("on", True))
     success = car.toggle_lights(on=on)
     return jsonify({"ok": success, "lights": on})
 
-@app.route('/api/send_raw', methods=['POST'])
+
+@app.route("/api/send_raw", methods=["POST"])
 def api_send_raw():
-    """Send a raw hex packet to the car. Body: {"hex": "...", "port": 23458}"""
+    user, error = require_admin()
+    if error:
+        return error
+    if not local_request():
+        return jsonify({"ok": False, "error": "raw_sender_local_only"}), 403
     init_car()
     data = request.get_json(silent=True) or {}
-    hex_data = data.get('hex', '')
-    port = data.get('port', 23458)
-    
+    hex_data = data.get("hex", "")
+    port = data.get("port", 23458)
+
     try:
         import socket
-        raw = bytes.fromhex(hex_data.replace(' ', '').replace(':', ''))
+        raw = bytes.fromhex(hex_data.replace(" ", "").replace(":", ""))
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.sendto(raw, (car.car_ip, port))
         sock.close()
-        car.log("TX", f"Raw {len(raw)}B → {car.car_ip}:{port} [{hex_data[:40]}...]")
+        car.log("TX", f"Raw {len(raw)}B -> {car.car_ip}:{port} [{hex_data[:40]}...]")
         return jsonify({"ok": True, "sent": len(raw)})
     except Exception as e:
         car.log("ERROR", f"Raw send failed: {e}")
         return jsonify({"ok": False, "error": str(e)})
 
-@app.route('/api/protocol')
+
+@app.route("/api/protocol")
 def api_protocol():
-    """Return protocol documentation."""
+    user, error = require_admin()
+    if error:
+        return error
     return jsonify({
         "header": {
             "size": 32,
@@ -137,39 +594,23 @@ def api_protocol():
                 {"offset": 22, "size": 2, "name": "frag_idx", "type": "uint16_le", "desc": "Fragment index (0-based)"},
                 {"offset": 24, "size": 4, "name": "data_offset", "type": "uint32_le", "desc": "Byte offset in frame"},
                 {"offset": 28, "size": 4, "name": "data_len", "type": "uint32_le", "desc": "Payload length"},
-            ]
+            ],
         },
-        "ports": {
-            "video": 1234,
-            "handshake": 23459,
-            "control": 23458,
-        },
-        "codec": {
-            "type": "H.264",
-            "profile": "Constrained Baseline",
-            "level": "3.1",
-            "resolution": "640x360",
-            "fps": 20,
-        },
-        "handshake": {
-            "wake": HANDSHAKE_WAKE.hex(),
-            "trigger": HANDSHAKE_TRIGGER.hex(),
-        },
+        "ports": {"video": 1234, "handshake": 23459, "control": 23458},
+        "codec": {"type": "H.264", "profile": "Constrained Baseline", "level": "3.1", "resolution": "640x360", "fps": 20},
+        "handshake": {"wake": HANDSHAKE_WAKE.hex(), "trigger": HANDSHAKE_TRIGGER.hex()},
         "heartbeat": HEARTBEAT.hex(),
         "sps_pps": SPS_PPS.hex(),
     })
 
-# ── Video Stream ───────────────────────────────────────────────────────
 
-@app.route('/api/stream')
+# Video Stream
+
+@app.route("/api/stream")
 def api_stream():
-    """MJPEG video stream endpoint — delivers frames as fast as decoded.
-
-    No artificial rate limiting. Frame delivery is paced by:
-    1. The car sending ~20fps H.264 over UDP
-    2. ffmpeg decoding each frame (~5-15ms with persistent process)
-    3. The browser's <img> MJPEG rendering speed
-    """
+    user, error = require_user()
+    if error:
+        return error
     init_car()
 
     def generate():
@@ -178,33 +619,70 @@ def api_stream():
             jpeg = decoder.get_latest_jpeg() if decoder else None
             if jpeg:
                 frame_count = decoder.frame_count
-                # Only send if we have a NEW frame (avoid re-sending same JPEG)
                 if frame_count != last_count:
                     last_count = frame_count
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n'
-                           + jpeg + b'\r\n')
-            # Small sleep to avoid busy-spinning (5ms = up to 200fps ceiling)
+                    yield (b"--frame\r\n"
+                           b"Content-Type: image/jpeg\r\n\r\n"
+                           + jpeg + b"\r\n")
             time.sleep(0.005)
 
     return Response(
         generate(),
-        mimetype='multipart/x-mixed-replace; boundary=frame',
-        headers={
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0',
-        }
+        mimetype="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"},
     )
 
-# ── Main ───────────────────────────────────────────────────────────────
 
-# Import hex strings from car_protocol for the /api/protocol endpoint
-from car_protocol import HANDSHAKE_WAKE, HANDSHAKE_TRIGGER, HEARTBEAT
+# Socket.IO
 
-if __name__ == '__main__':
+@socketio.on("connect")
+def ws_connect():
+    user = current_user()
+    if not user:
+        return False
+    ensure_timer()
+    with state_lock:
+        lobby["users"][user["id"]] = user
+        lobby["sid_to_user"][request.sid] = user["id"]
+        lobby["user_sids"].setdefault(user["id"], set()).add(request.sid)
+    join_room("lobby")
+    emit("lobby:update", lobby_snapshot())
+    broadcast_lobby()
+
+
+@socketio.on("disconnect")
+def ws_disconnect():
+    changed = False
+    with state_lock:
+        user_id = lobby["sid_to_user"].pop(request.sid, None)
+        if user_id:
+            sids = lobby["user_sids"].get(user_id, set())
+            sids.discard(request.sid)
+            if not sids:
+                lobby["user_sids"].pop(user_id, None)
+                lobby["users"].pop(user_id, None)
+                remove_from_queue(user_id)
+                if lobby["active_driver"] == user_id:
+                    next_driver_locked("active driver disconnected")
+                changed = True
+    leave_room("lobby")
+    if changed:
+        broadcast_lobby()
+
+
+@socketio.on("control:command")
+def ws_control_command(data):
+    user = current_user()
+    if not user:
+        emit("control:ack", {"ok": False, "error": "login_required"})
+        return
+    emit("control:ack", handle_control_command(user, data or {}))
+
+
+if __name__ == "__main__":
+    ensure_timer()
     print("=" * 60)
-    print("  WLtoys FPV Car - Debug Cockpit")
+    print("  WLtoys FPV Car - Race Lobby Cockpit")
     print("  http://localhost:5555")
     print("=" * 60)
-    app.run(host='0.0.0.0', port=5555, threaded=True, debug=False)
+    socketio.run(app, host="0.0.0.0", port=5555, debug=False, allow_unsafe_werkzeug=True)

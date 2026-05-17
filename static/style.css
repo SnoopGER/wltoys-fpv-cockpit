@@ -52,6 +52,32 @@ header h1 .dim { color: var(--dim); font-weight: 400; }
 
 .header-right { display: flex; align-items: center; gap: 12px; }
 
+.auth-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.auth-pill a {
+  color: var(--accent2);
+  text-decoration: none;
+}
+
+.role-badge {
+  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
 .status-pill {
   display: flex;
   align-items: center;
@@ -294,6 +320,40 @@ main {
   font-size: 10px;
   color: var(--dim);
   padding: 0 10px 10px;
+}
+
+/* ── Lobby ─────────────────────────────────────────────── */
+.queue-box {
+  padding: 0 10px 10px;
+}
+
+.queue-title {
+  color: var(--dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+
+.queue-list {
+  margin-left: 18px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.dim-item {
+  color: var(--dim);
+}
+
+.number-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--accent2);
+  font-family: var(--font);
+  font-size: 12px;
 }
 
 /* ── Raw Sender ────────────────────────────────────────── */

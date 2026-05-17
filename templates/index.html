@@ -3,16 +3,29 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🏎️ FPV Debug Cockpit</title>
+<title>🏎️ FPV Race Lobby</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body data-user-role="{{ user.role if user else 'guest' }}" data-user-id="{{ user.id if user else '' }}">
 <!-- ─── HEADER ─────────────────────────────────────────── -->
 <header>
   <div class="header-left">
-    <h1>🏎️ WLTOYS 6405 <span class="dim">DEBUG COCKPIT</span></h1>
+    <h1>🏎️ WLTOYS 6405 <span class="dim">RACE LOBBY</span></h1>
   </div>
   <div class="header-right">
+    <div class="auth-pill">
+      {% if user %}
+        <span id="userName">{{ user.display_name }}</span>
+        <span class="role-badge" id="userRole">{{ user.role }}</span>
+        <a href="/logout">LOGOUT</a>
+      {% else %}
+        {% if discord_configured %}
+          <a href="/login">DISCORD LOGIN</a>
+        {% else %}
+          <span>DISCORD OAUTH NOT CONFIGURED</span>
+        {% endif %}
+      {% endif %}
+    </div>
     <div class="gamepad-pill" id="gamepadPill" title="Gamepad status">
       <span class="gamepad-dot" id="gamepadDot"></span>
       <select id="gamepadSelect" class="gamepad-select" onchange="onGamepadSelectChange()">
@@ -53,8 +66,8 @@
     <div class="panel control-panel">
       <div class="panel-header">🔌 CONNECTION</div>
       <div class="button-row">
-        <button class="btn btn-green" id="btnConnect" onclick="doConnect()">▶ CONNECT</button>
-        <button class="btn btn-red" id="btnDisconnect" onclick="doDisconnect()" disabled>■ DISCONNECT</button>
+        <button class="btn btn-green admin-only" id="btnConnect" onclick="doConnect()">▶ CONNECT</button>
+        <button class="btn btn-red admin-only" id="btnDisconnect" onclick="doDisconnect()" disabled>■ DISCONNECT</button>
       </div>
       <div class="info-grid">
         <div class="info-label">Car IP</div><div class="info-value" id="infoCarIp">172.16.11.1</div>
@@ -63,6 +76,56 @@
         <div class="info-label">Heartbeats</div><div class="info-value" id="infoHB">0</div>
       </div>
     </div>
+
+    <!-- Lobby -->
+    <div class="panel control-panel">
+      <div class="panel-header">🏁 LOBBY</div>
+      <div class="info-grid">
+        <div class="info-label">Active Driver</div><div class="info-value" id="lobbyActiveDriver">--</div>
+        <div class="info-label">Time Left</div><div class="info-value" id="lobbyTimeLeft">--</div>
+        <div class="info-label">Car</div><div class="info-value" id="lobbyCarStatus">offline</div>
+        <div class="info-label">Spectators</div><div class="info-value" id="lobbySpectators">0</div>
+      </div>
+      <div class="queue-box">
+        <div class="queue-title">Queue</div>
+        <ol id="queueList" class="queue-list"></ol>
+      </div>
+      <div class="button-row">
+        <button class="btn btn-green driver-only" id="btnJoinQueue" onclick="joinQueue()">JOIN QUEUE</button>
+        <button class="btn btn-blue driver-only" onclick="leaveQueue()">LEAVE</button>
+      </div>
+    </div>
+
+    {% if user and user.role == 'admin' %}
+    <!-- Admin -->
+    <div class="panel control-panel admin-panel">
+      <div class="panel-header">🛡️ ADMIN</div>
+      <div class="button-row">
+        <button class="btn btn-red" onclick="adminAction('emergency_stop')">E-STOP</button>
+        <button class="btn btn-blue" onclick="adminAction('pause')">PAUSE</button>
+        <button class="btn btn-green" onclick="adminAction('resume')">RESUME</button>
+      </div>
+      <div class="button-row">
+        <button class="btn btn-blue" onclick="adminAction('next_driver')">NEXT</button>
+        <button class="btn btn-red" onclick="adminAction('kick_current_driver')">KICK</button>
+        <button class="btn" onclick="adminAction('clear_queue')">CLEAR</button>
+      </div>
+      <div class="motor-sliders">
+        <div class="slider-row">
+          <label class="slider-label">Remote Speed Cap <span id="adminSpeedValue" class="slider-val">--%</span></label>
+          <input type="range" id="adminSpeedLimit" min="5" max="100" value="70" class="motor-slider">
+        </div>
+        <div class="slider-row">
+          <label class="slider-label">Session Seconds <span id="adminDurationValue" class="slider-val">120s</span></label>
+          <input type="number" id="adminDuration" min="15" max="3600" value="120" class="number-input">
+        </div>
+      </div>
+      <div class="button-row">
+        <button class="btn btn-blue" onclick="setAdminSpeed()">SET SPEED</button>
+        <button class="btn btn-blue" onclick="setSessionDuration()">SET TIMER</button>
+      </div>
+    </div>
+    {% endif %}
 
     <!-- Motor Control -->
     <div class="panel control-panel">
@@ -109,6 +172,7 @@
       </div>
     </div>
 
+    {% if user and user.role == 'admin' and is_local %}
     <!-- Raw Hex Sender -->
     <div class="panel control-panel">
       <div class="panel-header">🔧 RAW PACKET SENDER</div>
@@ -122,6 +186,7 @@
         <button class="btn btn-blue" onclick="sendRaw()">SEND</button>
       </div>
     </div>
+    {% endif %}
   </div>
 </main>
 
@@ -148,6 +213,7 @@
 </section>
 
 <!-- ─── PROTOCOL REFERENCE (collapsible) ───────────────── -->
+{% if user and user.role == 'admin' %}
 <details class="protocol-ref">
   <summary>📖 PROTOCOL REFERENCE</summary>
   <div class="protocol-content">
@@ -177,7 +243,9 @@
     <code>000000016742001f963540a00b74dc040404080000000168ce31b2</code>
   </div>
 </details>
+{% endif %}
 
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

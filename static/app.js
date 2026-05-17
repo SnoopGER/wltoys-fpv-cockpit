@@ -10,6 +10,11 @@ let motorInterval = null;   // Continuous motor command sender
 let currentCommand = null;  // Currently held command
 let motorSpeed = 100;       // Throttle power 0-100%
 let motorSteerRange = 100;  // Steering angle 0-100%
+let lobbyState = null;
+let canControl = false;
+let socket = null;
+const userRole = document.body.dataset.userRole || 'guest';
+const userId = document.body.dataset.userId || '';
 
 // ── DOM Refs ─────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -23,8 +28,28 @@ const btnConnect = $('btnConnect');
 const btnDisconnect = $('btnDisconnect');
 const logContainer = $('logContainer');
 
+function isLoggedIn() { return userRole !== 'guest'; }
+function isAdmin() { return userRole === 'admin'; }
+function isDriverRole() { return userRole === 'admin' || userRole === 'driver'; }
+
+function startVideoStream() {
+  if (streaming) return;
+  videoFeed.src = '/api/stream?t=' + Date.now();
+  videoFeed.classList.add('active');
+  videoOverlay.classList.add('hidden');
+  streaming = true;
+}
+
+function stopVideoStream() {
+  streaming = false;
+  videoFeed.src = '';
+  videoFeed.classList.remove('active');
+  videoOverlay.classList.remove('hidden');
+}
+
 // ── Connection ───────────────────────────────────────────
 async function doConnect() {
+  if (!isAdmin()) return;
   addLog('SYS', 'Connecting...');
   btnConnect.disabled = true;
   setStatus('connecting', 'CONNECTING...');
@@ -39,11 +64,7 @@ async function doConnect() {
       btnConnect.disabled = true;
       btnDisconnect.disabled = false;
 
-      // Start video stream
-      videoFeed.src = '/api/stream?t=' + Date.now();
-      videoFeed.classList.add('active');
-      videoOverlay.classList.add('hidden');
-      streaming = true;
+      startVideoStream();
 
       // Start polling
       startPolling();
@@ -61,14 +82,12 @@ async function doConnect() {
 }
 
 async function doDisconnect() {
+  if (!isAdmin()) return;
   stopMotor();
   try { await fetch('/api/disconnect', { method: 'POST' }); } catch (e) {}
 
   connected = false;
-  streaming = false;
-  videoFeed.src = '';
-  videoFeed.classList.remove('active');
-  videoOverlay.classList.remove('hidden');
+  stopVideoStream();
   setStatus('disconnected', 'DISCONNECTED');
   btnConnect.disabled = false;
   btnDisconnect.disabled = true;
@@ -95,10 +114,12 @@ async function pollStatus() {
     const resp = await fetch('/api/status');
     const s = await resp.json();
 
+    connected = ['connected', 'streaming'].includes(s.state);
     if (s.state === 'streaming' && !streaming) {
-      streaming = true;
       setStatus('streaming', 'STREAMING');
-      videoOverlay.classList.add('hidden');
+      if (isLoggedIn()) startVideoStream();
+    } else if (connected) {
+      setStatus('connected', 'CONNECTED');
     }
 
     $('infoPackets').textContent = s.packets_received.toLocaleString();
@@ -133,7 +154,7 @@ async function pollLogs() {
 
 // ── Motor Control (continuous 20Hz while held) ───────────
 function startMotor(command) {
-  if (!connected) return;
+  if (!connected || !canControl) return;
   if (currentCommand === command) return; // Already running this
 
   // Clear old interval WITHOUT sending stop (avoids brief centering between commands)
@@ -156,15 +177,20 @@ function stopMotor() {
   currentCommand = null;
 
   // Send neutral
-  if (connected) sendMotorCmd('stop');
+  if (connected && canControl) sendMotorCmd('stop');
 }
 
 async function sendMotorCmd(command) {
   try {
+    const payload = { command, speed: motorSpeed, steer_range: motorSteerRange, client_ts: Date.now() / 1000 };
+    if (socket && socket.connected) {
+      socket.emit('control:command', payload);
+      return;
+    }
     await fetch('/api/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command, speed: motorSpeed, steer_range: motorSteerRange }),
+      body: JSON.stringify(payload),
     });
   } catch (e) {}
 }
@@ -173,7 +199,7 @@ async function sendMotorCmd(command) {
 let lightsOn = false;
 
 async function toggleLights() {
-  if (!connected) return;
+  if (!connected || !canControl) return;
   lightsOn = !lightsOn;
   try {
     const resp = await fetch('/api/lights', {
@@ -194,6 +220,142 @@ async function toggleLights() {
     addLog('ERR', 'Lights error: ' + e.message);
     lightsOn = !lightsOn;
   }
+}
+
+// ── Lobby + Admin ───────────────────────────────────────
+function userLabel(user) {
+  if (!user) return '--';
+  return user.display_name || user.username || user.id;
+}
+
+function renderLobby(data) {
+  lobbyState = data;
+  const active = data.active_driver;
+  canControl = isAdmin() || (active && active.id === userId && userRole === 'driver');
+  connected = Boolean(data.car_online);
+
+  if ($('lobbyActiveDriver')) $('lobbyActiveDriver').textContent = userLabel(active);
+  if ($('lobbyTimeLeft')) $('lobbyTimeLeft').textContent = formatTime(data.remaining_drive_time || 0);
+  if ($('lobbyCarStatus')) {
+    $('lobbyCarStatus').textContent = data.car_online ? 'online' : 'offline';
+    $('lobbyCarStatus').style.color = data.car_online ? 'var(--green)' : 'var(--red)';
+  }
+  if ($('lobbySpectators')) $('lobbySpectators').textContent = (data.connected_spectators || []).length;
+
+  const queueList = $('queueList');
+  if (queueList) {
+    queueList.innerHTML = '';
+    for (const user of data.queue || []) {
+      const li = document.createElement('li');
+      li.textContent = userLabel(user);
+      queueList.appendChild(li);
+    }
+    if (!queueList.children.length) {
+      const li = document.createElement('li');
+      li.textContent = 'empty';
+      li.className = 'dim-item';
+      queueList.appendChild(li);
+    }
+  }
+
+  if (data.car_online) {
+    setStatus('connected', 'CONNECTED');
+    if (isLoggedIn()) startVideoStream();
+    if (!statusPoller || !logPoller) startPolling();
+  } else if (!isAdmin()) {
+    setStatus('disconnected', 'DISCONNECTED');
+    stopVideoStream();
+  }
+
+  const speedLimit = $('adminSpeedLimit');
+  const speedValue = $('adminSpeedValue');
+  const duration = $('adminDuration');
+  const durationValue = $('adminDurationValue');
+  if (speedLimit && speedValue) {
+    speedLimit.value = data.max_speed_percent;
+    speedValue.textContent = data.max_speed_percent + '%';
+  }
+  if (duration && durationValue) {
+    duration.value = data.session_duration;
+    durationValue.textContent = data.session_duration + 's';
+  }
+
+  updateRoleUi();
+}
+
+async function refreshLobby() {
+  if (!isLoggedIn()) return;
+  try {
+    const resp = await fetch('/api/lobby');
+    if (resp.ok) renderLobby(await resp.json());
+  } catch (e) {}
+}
+
+async function joinQueue() {
+  if (!isDriverRole()) return;
+  try {
+    const resp = await fetch('/api/queue/join', { method: 'POST' });
+    if (resp.ok) renderLobby(await resp.json());
+  } catch (e) {}
+}
+
+async function leaveQueue() {
+  if (!isDriverRole()) return;
+  try {
+    const resp = await fetch('/api/queue/leave', { method: 'POST' });
+    if (resp.ok) renderLobby(await resp.json());
+  } catch (e) {}
+}
+
+async function adminAction(action, body = {}) {
+  if (!isAdmin()) return;
+  stopMotor();
+  try {
+    const resp = await fetch('/api/admin/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (resp.ok) renderLobby(await resp.json());
+  } catch (e) {}
+}
+
+function setAdminSpeed() {
+  const input = $('adminSpeedLimit');
+  if (input) adminAction('set_max_speed', { value: parseInt(input.value) });
+}
+
+function setSessionDuration() {
+  const input = $('adminDuration');
+  if (input) adminAction('set_session_duration', { value: parseInt(input.value) });
+}
+
+function updateRoleUi() {
+  for (const el of document.querySelectorAll('.admin-only')) {
+    el.style.display = isAdmin() ? '' : 'none';
+  }
+  for (const el of document.querySelectorAll('.driver-only')) {
+    el.style.display = isDriverRole() ? '' : 'none';
+  }
+  for (const el of document.querySelectorAll('.dpad-btn, #btnLights, #speedSlider, #steerSlider')) {
+    el.disabled = !canControl;
+  }
+}
+
+function initSocket() {
+  if (!isLoggedIn() || typeof io === 'undefined') {
+    refreshLobby();
+    if (isLoggedIn()) setInterval(refreshLobby, 1000);
+    return;
+  }
+  socket = io();
+  socket.on('connect', () => addLog('SYS', 'Lobby socket connected.'));
+  socket.on('lobby:update', renderLobby);
+  socket.on('control:ack', (data) => {
+    if (data && !data.ok && data.error !== 'stale_command') {
+      addLog('WARN', 'Command rejected: ' + data.error);
+    }
+  });
 }
 
 // ── Raw Sender ───────────────────────────────────────────
@@ -869,6 +1031,9 @@ function initSliders() {
 
 // ── Init ─────────────────────────────────────────────────
 initSliders();
+updateRoleUi();
+initSocket();
+if (isLoggedIn()) startPolling();
 addLog('SYS', '🏎️ FPV Debug Cockpit loaded.');
 addLog('SYS', 'Car: WL_FPV_CAR_99613492 @ 172.16.11.1');
 addLog('SYS', 'Codec: H.264 Baseline 640×360 @ 20fps');
