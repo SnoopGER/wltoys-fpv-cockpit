@@ -1,15 +1,16 @@
 """
 WLtoys FPV Car - H.264 → JPEG Video Decoder (v9 - PyAV in-process)
 
-Previous versions used ffmpeg subprocess per frame (~30-50ms overhead → ~10-15fps).
-This version uses PyAV (Python C bindings for ffmpeg) for in-process H.264 decode.
-Combined with PIL JPEG encoding, total pipeline is <1ms per frame — easily 25fps.
+Uses PyAV (Python C bindings for ffmpeg) for in-process H.264 decode.
+Every frame is fed to the codec in order (H.264 P-frames need previous frames).
+Encoded to JPEG via numpy + PIL.
 """
 
 import threading
 import time
 import io
 import av
+import numpy as np
 from PIL import Image
 from typing import Optional
 from queue import Queue, Empty
@@ -30,7 +31,7 @@ class VideoDecoder:
         self._running = False
         self._got_keyframe = False
         self._thread: Optional[threading.Thread] = None
-        self._feed_queue: Queue = Queue(maxsize=5)  # Tiny queue — always decode latest
+        self._feed_queue: Queue = Queue(maxsize=100)
 
     def start(self):
         if self._running:
@@ -73,38 +74,36 @@ class VideoDecoder:
             return self._latest_jpeg
 
     def _decode_loop(self):
-        """Decode H.264 frames using PyAV, encode to JPEG with PIL."""
+        """Decode H.264 frames using PyAV, encode to JPEG with PIL.
+
+        IMPORTANT: Every frame must be fed to the codec in order.
+        H.264 P-frames reference previous frames — skipping them
+        breaks the reference chain and produces blocky/corrupt output.
+        """
         codec_ctx = av.CodecContext.create('h264', 'r')
 
         while self._running:
-            # Get one frame from queue
             try:
                 h264_data = self._feed_queue.get(timeout=0.5)
             except Empty:
                 continue
 
-            # Drain queue to get the LATEST frame (drop old ones)
-            latest_data = h264_data
-            while not self._feed_queue.empty():
-                try:
-                    latest_data = self._feed_queue.get_nowait()
-                except Empty:
-                    break
-
             try:
-                # Feed ALL accumulated data to codec (maintains H.264 state)
-                # We need to feed h264_data too, not just latest_data
-                # But since they're sequential, just feed the latest
-                # (codec state comes from keyframes, P-frames are self-contained refs)
-                packet = av.Packet(latest_data)
+                packet = av.Packet(h264_data)
                 frames = codec_ctx.decode(packet)
 
                 for frame in frames:
-                    # Convert to PIL Image directly (faster than to_ndarray)
-                    img = frame.to_image()
-                    if img.width != self.width or img.height != self.height:
-                        img = img.resize((self.width, self.height), Image.NEAREST)
+                    # Convert to numpy BGR array
+                    arr = frame.to_ndarray(format='bgr24')
 
+                    # Resize if needed (PIL is fast for this)
+                    if frame.width != self.width or frame.height != self.height:
+                        img = Image.fromarray(arr[:, :, ::-1])  # BGR→RGB
+                        img = img.resize((self.width, self.height), Image.NEAREST)
+                    else:
+                        img = Image.fromarray(arr[:, :, ::-1])
+
+                    # Encode to JPEG
                     buf = io.BytesIO()
                     img.save(buf, format='JPEG', quality=self.quality)
                     jpeg_data = buf.getvalue()
