@@ -1,0 +1,13 @@
+WLtoys 6405 FPV Car — Connection Info
+
+SSID: WL_FPV_CAR_99613492
+Car IP: 172.16.11.1
+
+Ports:
+  1234/udp  — Video stream (H.264 fragments)
+  23458/udp — Motor control / heartbeat
+  23459/udp — Handshake / keepalive
+
+The car creates its own WiFi access point. Connect to it,
+then the cockpit at http://172.16.11.1 is NOT the web UI —
+use the Python cockpit on your LAN instead.
