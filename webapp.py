@@ -627,6 +627,16 @@ def remove_user_from_lobby(user_id, reason, disconnect_sockets=True):
 
 
 def kick_user(user_id, reason="admin kick"):
+    # Also invalidate guest sessions so they can't re-authenticate
+    if user_id.startswith("guest-"):
+        with guest_codes_lock:
+            active_guest_sessions.pop(user_id, None)
+    # Notify the user they've been kicked via socket.io
+    for sid in list(lobby.get("user_sids", {}).get(user_id, set())):
+        try:
+            socketio.emit("kicked", {"reason": reason}, room=sid, namespace="/")
+        except Exception:
+            pass
     return remove_user_from_lobby(user_id, reason, disconnect_sockets=True)
 
 

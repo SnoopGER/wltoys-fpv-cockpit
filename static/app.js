@@ -445,6 +445,13 @@ function initSocket() {
       addLog('WARN', 'Command rejected: ' + data.error);
     }
   });
+  socket.on('kicked', (data) => {
+    addLog('ERR', 'You have been kicked: ' + (data.reason || 'by admin'));
+    // Force logout after a short delay
+    setTimeout(() => {
+      window.location.href = '/logout';
+    }, 2000);
+  });
 }
 
 // ── Raw Sender ───────────────────────────────────────────
