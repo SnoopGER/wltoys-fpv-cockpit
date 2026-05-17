@@ -34,7 +34,7 @@ def init_car():
             on_log=lambda level, msg: None,
         )
     if decoder is None:
-        decoder = VideoDecoder(width=640, height=360, quality=15)
+        decoder = VideoDecoder(width=640, height=360, quality=75)
     
     # Wire up frame delivery: car → decoder
     car.on_frame = lambda data: decoder.feed_frame(data)
@@ -154,18 +154,29 @@ def api_protocol():
 
 @app.route('/api/stream')
 def api_stream():
-    """MJPEG video stream endpoint — rate-limited to ~10fps to avoid CPU overload."""
+    """MJPEG video stream endpoint — delivers frames as fast as decoded.
+
+    No artificial rate limiting. Frame delivery is paced by:
+    1. The car sending ~20fps H.264 over UDP
+    2. ffmpeg decoding each frame (~5-15ms with persistent process)
+    3. The browser's <img> MJPEG rendering speed
+    """
     init_car()
 
     def generate():
+        last_count = -1
         while True:
             jpeg = decoder.get_latest_jpeg() if decoder else None
             if jpeg:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n'
-                       + jpeg + b'\r\n')
-            # Rate limit: ~10fps max to avoid CPU overload
-            time.sleep(0.1)
+                frame_count = decoder.frame_count
+                # Only send if we have a NEW frame (avoid re-sending same JPEG)
+                if frame_count != last_count:
+                    last_count = frame_count
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n'
+                           + jpeg + b'\r\n')
+            # Small sleep to avoid busy-spinning (5ms = up to 200fps ceiling)
+            time.sleep(0.005)
 
     return Response(
         generate(),

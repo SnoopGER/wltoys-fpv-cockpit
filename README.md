@@ -2,8 +2,6 @@
 
 **Control your WLtoys 6405 FPV RC car from a web browser — live video stream + keyboard/gamepad motor control.**
 
-![FPV Cockpit Dashboard](docs/cockpit-screenshot.png)
-
 Reverse-engineered from the Android app (`com.lg.wltechfpvcar`). No encryption, no cloud, pure local UDP.
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Status](https://img.shields.io/badge/status-working-brightgreen)
@@ -12,7 +10,7 @@ Reverse-engineered from the Android app (`com.lg.wltechfpvcar`). No encryption, 
 
 ## Features
 
-- **Live FPV video** — H.264 stream decoded to MJPEG in-browser (~10fps)
+- **Live FPV video** — H.264 stream decoded to MJPEG in-browser (~25fps)
 - **Motor control** — WASD keys + D-pad buttons at 20Hz (matches original app rate)
 - **Dual-axis combos** — steer while accelerating (W+A, W+D, S+A, S+D)
 - **Speed & steering sliders** — adjust throttle power (5–100%) and steering angle (5–100%)
@@ -35,7 +33,7 @@ git clone https://github.com/YOUR_USERNAME/wltoys-fpv-cockpit.git
 cd wltoys-fpv-cockpit
 
 # Install dependencies
-pip install flask Pillow
+pip install flask av Pillow numpy
 
 # Connect to the car's WiFi (SSID: WL_FPV_CAR_XXXXXXXX)
 # The car creates its own access point — no internet needed
@@ -91,6 +89,10 @@ FPV_CAR_IP=172.16.11.1 bash start.sh
 ### D-Pad (Mouse/Touch)
 
 Click or tap the D-pad buttons in the cockpit. Hold for continuous movement.
+
+### Gamepad / USB Controller
+
+Xbox One and standard HID gamepads are supported via the HTML5 Gamepad API.
 
 ---
 
@@ -205,7 +207,7 @@ wltoys-fpv-cockpit/
 ├── CAR.pcap                    ← Reference packet capture from the original app
 ├── CAR WIFI INFO               ← Car connection reference
 ├── car_protocol.py             ← UDP protocol implementation
-├── video_decoder.py            ← H.264 → JPEG decoder (via ffmpeg)
+├── video_decoder.py            ← H.264 → JPEG decoder (via PyAV - in-process H.264 decode)
 ├── webapp.py                   ← Flask web server (REST API + MJPEG + SSE)
 ├── templates/
 │   └── index.html              ← Cockpit UI
@@ -229,11 +231,21 @@ Flask webapp.py
     │         └── Receiver thread (:1234)
     │                    │
     │                    ▼  Raw H.264 frames
-    └──► video_decoder.py ──► ffmpeg ──► JPEG
+    └──► video_decoder.py (PyAV) ──► JPEG
                 │
                 ▼  MJPEG stream
            Browser <img> (/api/stream)
 ```
+
+---
+
+## Video Decoder
+
+The H.264 video decoder evolved through several iterations:
+
+- **v4:** file-based ffmpeg subprocess per frame (~8-10fps)
+- **v9:** PyAV in-process decode + PIL JPEG encode (<1ms per frame, ~25fps)
+- **Key insight:** H.264 P-frames need the preceding keyframe in the bitstream to decode correctly
 
 ---
 
@@ -296,5 +308,5 @@ MIT — See [LICENSE](LICENSE) for details.
 ## Credits
 
 - WLtoys for building a fun little car with an unencrypted protocol
-- ffmpeg for the H.264 decoding backend
+- ffmpeg / PyAV for the H.264 decoding backend
 - Flask for the lightweight web server

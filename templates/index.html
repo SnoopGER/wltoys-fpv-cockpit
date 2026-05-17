@@ -13,6 +13,10 @@
     <h1>🏎️ WLTOYS 6405 <span class="dim">DEBUG COCKPIT</span></h1>
   </div>
   <div class="header-right">
+    <div class="gamepad-pill" id="gamepadPill" title="Gamepad status">
+      <span class="gamepad-dot" id="gamepadDot"></span>
+      <span id="gamepadText">🎮 No Gamepad</span>
+    </div>
     <div class="status-pill" id="statusPill">
       <span class="status-dot" id="statusDot"></span>
       <span id="statusText">DISCONNECTED</span>
@@ -82,7 +86,7 @@
           <input type="range" id="steerSlider" min="5" max="100" value="100" class="motor-slider">
         </div>
       </div>
-      <p class="hint">WASD keys also work when connected</p>
+      <p class="hint">WASD keys + Xbox gamepad also work when connected</p>
     </div>
 
     <!-- Stats -->

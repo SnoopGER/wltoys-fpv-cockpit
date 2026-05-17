@@ -196,6 +196,219 @@ async function sendRaw() {
   }
 }
 
+// ── Gamepad State ────────────────────────────────────────
+let gamepadActive = false;
+let gamepadPoller = null;
+let gpBtnPrev = {};  // Previous button states for edge detection
+
+const DEADZONE = 0.15;
+
+// ── Gamepad UI Helpers ───────────────────────────────────
+function setGamepadUI(connected, name) {
+  const dot = $('gamepadDot');
+  const txt = $('gamepadText');
+  if (connected) {
+    dot.classList.add('connected');
+    txt.textContent = '🎮 ' + (name || 'Xbox Controller');
+  } else {
+    dot.classList.remove('connected');
+    txt.textContent = '🎮 No Gamepad';
+  }
+}
+
+// ── Gamepad Connect/Disconnect Events ───────────────────
+window.addEventListener('gamepadconnected', (e) => {
+  addLog('SYS', '🎮 Gamepad connected: ' + e.gamepad.id);
+  setGamepadUI(true, e.gamepad.id.substring(0, 30));
+  if (!gamepadPoller) {
+    gamepadPoller = setInterval(pollGamepad, 50);
+  }
+});
+
+window.addEventListener('gamepaddisconnected', (e) => {
+  addLog('SYS', '🎮 Gamepad disconnected: ' + e.gamepad.id);
+  setGamepadUI(false);
+  // If no gamepads remain, stop polling
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const anyConnected = Array.from(pads).some(p => p !== null);
+  if (!anyConnected) {
+    if (gamepadPoller) { clearInterval(gamepadPoller); gamepadPoller = null; }
+    gamepadActive = false;
+    // Resume keyboard control if keys are held
+    if (activeKeys.size > 0) updateMotorFromKeys();
+  }
+});
+
+// ── Apply circular deadzone ──────────────────────────────
+function applyDeadzone(x, y) {
+  const mag = Math.sqrt(x * x + y * y);
+  if (mag < DEADZONE) return { x: 0, y: 0 };
+  // Rescale so values just outside deadzone start from 0
+  const scale = (mag - DEADZONE) / (1 - DEADZONE);
+  const nx = (x / mag) * scale;
+  const ny = (y / mag) * scale;
+  return { x: Math.max(-1, Math.min(1, nx)), y: Math.max(-1, Math.min(1, ny)) };
+}
+
+// ── Gamepad Polling Loop (20Hz, 50ms) ────────────────────
+function pollGamepad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const gp = Array.from(pads).find(p => p !== null);
+  if (!gp) return;
+
+  // ── Axes ──
+  const rawLX = gp.axes[0] || 0;  // Left stick X
+  const rawLY = gp.axes[1] || 0;  // Left stick Y (up = -1)
+  const rawRX = gp.axes[3] || 0;  // Right stick X (alt steering)
+  // Right trigger: axis 5 (range 0..1 on Xbox, or -1..1)
+  // Also check button 7 (RT) as fallback
+  const rawRT = gp.axes[5] !== undefined ? gp.axes[5] : 0;
+
+  // ── Primary stick (left) with circular deadzone ──
+  const left = applyDeadzone(rawLX, rawLY);
+  // ── Alternative: right stick X + right trigger ──
+  const rtNorm = rawRT > 0 ? rawRT : 0;  // Trigger 0..1
+  const rightSteerDead = applyDeadzone(rawRX, 0);
+
+  // Determine which input source has more magnitude (last-input-wins by magnitude)
+  const leftMag = Math.sqrt(left.x * left.x + left.y * left.y);
+  const altThrottle = rtNorm;  // Right trigger as throttle
+  const altSteer = Math.abs(rightSteerDead.x);
+
+  // Use whichever has more deflection for throttle
+  let throttleVal = 0;   // negative = forward, positive = reverse
+  let steerVal = 0;       // negative = left, positive = right
+
+  if (leftMag > 0.01) {
+    // Left stick is active — use it for both throttle and steer
+    throttleVal = left.y;  // Y: -1 = forward, +1 = reverse (inverted)
+    steerVal = left.x;     // X: -1 = left, +1 = right
+    gamepadActive = true;
+  } else if (altThrottle > 0.01 || altSteer > 0.01) {
+    // Alternative controls are active
+    throttleVal = altThrottle;  // RT: 0..1 means throttle forward
+    steerVal = rightSteerDead.x;
+    gamepadActive = true;
+  } else {
+    // Stick is in deadzone — if we were active, stop
+    if (gamepadActive) {
+      gamepadActive = false;
+      // Clear any active keyboard command tracking and stop
+      activeKeys.clear();
+      stopMotor();
+      // Restore sliders to manual defaults
+      restoreSliders();
+    }
+    handleGamepadButtons(gp);
+    return;
+  }
+
+  gamepadActive = true;
+
+  // ── Compute motor speed/steer from analog deflection ──
+  // Speed = proportional to stick deflection (5% min, 100% max)
+  const speedPct = Math.max(5, Math.round(Math.abs(throttleVal) * 100));
+  const steerPct = Math.max(5, Math.round(Math.abs(steerVal) * 100));
+
+  // Update sliders visually
+  const speedSlider = $('speedSlider');
+  const speedValue = $('speedValue');
+  const steerSlider = $('steerSlider');
+  const steerValue = $('steerValue');
+  if (speedSlider) { speedSlider.value = speedPct; speedValue.textContent = speedPct + '%'; motorSpeed = speedPct; }
+  if (steerSlider) { steerSlider.value = steerPct; steerValue.textContent = steerPct + '%'; motorSteerRange = steerPct; }
+
+  // ── Determine direction ──
+  const isForward = throttleVal < -DEADZONE;
+  const isReverse = throttleVal > DEADZONE;
+  const isLeft = steerVal < -DEADZONE;
+  const isRight = steerVal > DEADZONE;
+
+  let command = null;
+  if (isForward && isLeft) command = 'forward_left';
+  else if (isForward && isRight) command = 'forward_right';
+  else if (isReverse && isLeft) command = 'reverse_left';
+  else if (isReverse && isRight) command = 'reverse_right';
+  else if (isForward) command = 'forward';
+  else if (isReverse) command = 'reverse';
+  else if (isLeft) command = 'left';
+  else if (isRight) command = 'right';
+
+  if (command) {
+    startMotor(command);
+  } else {
+    stopMotor();
+  }
+
+  // ── Handle buttons ──
+  handleGamepadButtons(gp);
+}
+
+function restoreSliders() {
+  // Restore speed slider to 100, steer to 100 when gamepad releases
+  const speedSlider = $('speedSlider');
+  const speedValue = $('speedValue');
+  const steerSlider = $('steerSlider');
+  const steerValue = $('steerValue');
+  if (speedSlider) { speedSlider.value = 100; speedValue.textContent = '100%'; motorSpeed = 100; }
+  if (steerSlider) { steerSlider.value = 100; steerValue.textContent = '100%'; motorSteerRange = 100; }
+}
+
+function handleGamepadButtons(gp) {
+  // Edge-detect: only fire on button-down (not held)
+  for (let i = 0; i < gp.buttons.length; i++) {
+    const pressed = gp.buttons[i].pressed;
+    const wasDown = gpBtnPrev[i] || false;
+
+    if (pressed && !wasDown) {
+      // Button just pressed
+      switch (i) {
+        case 0: // A — emergency stop
+          stopMotor();
+          activeKeys.clear();
+          if (gamepadActive) { gamepadActive = false; restoreSliders(); }
+          addLog('SYS', '🎮 A: Emergency Stop');
+          break;
+        case 1: // B — toggle connection
+          if (connected) {
+            doDisconnect();
+            addLog('SYS', '🎮 B: Disconnected');
+          } else {
+            doConnect();
+            addLog('SYS', '🎮 B: Connecting...');
+          }
+          break;
+        case 4: // LB — decrease speed
+          {
+            const slider = $('speedSlider');
+            if (slider) {
+              const val = Math.max(5, parseInt(slider.value) - 5);
+              slider.value = val;
+              motorSpeed = val;
+              $('speedValue').textContent = val + '%';
+              addLog('SYS', '🎮 LB: Speed → ' + val + '%');
+            }
+          }
+          break;
+        case 5: // RB — increase speed
+          {
+            const slider = $('speedSlider');
+            if (slider) {
+              const val = Math.min(100, parseInt(slider.value) + 5);
+              slider.value = val;
+              motorSpeed = val;
+              $('speedValue').textContent = val + '%';
+              addLog('SYS', '🎮 RB: Speed → ' + val + '%');
+            }
+          }
+          break;
+      }
+    }
+
+    gpBtnPrev[i] = pressed;
+  }
+}
+
 // ── Keyboard Controls (WASD + arrows) ────────────────────
 // Keys mapped to THROTTLE or STEER axis (not directions)
 const throttleKeys = { 'w': true, 'W': true, 'ArrowUp': true,
@@ -244,10 +457,14 @@ document.addEventListener('keydown', (e) => {
   e.preventDefault();
   activeKeys.add(e.key);
 
+  // Space always stops, even during gamepad input
   if (e.key === ' ') {
     stopMotor();
     activeKeys.clear();
-  } else {
+    gamepadActive = false;
+    restoreSliders();
+  } else if (!gamepadActive) {
+    // Keyboard motor input only when gamepad is not actively controlling
     updateMotorFromKeys();
   }
 });
@@ -258,7 +475,9 @@ document.addEventListener('keyup', (e) => {
   activeKeys.delete(e.key);
   if (throttleKeys[e.key] || steerKeys[e.key]) {
     e.preventDefault();
-    updateMotorFromKeys();
+    if (!gamepadActive) {
+      updateMotorFromKeys();
+    }
   }
 });
 
@@ -379,4 +598,4 @@ initSliders();
 addLog('SYS', '🏎️ FPV Debug Cockpit loaded.');
 addLog('SYS', 'Car: WL_FPV_CAR_99613492 @ 172.16.11.1');
 addLog('SYS', 'Codec: H.264 Baseline 640×360 @ 20fps');
-addLog('SYS', 'Motor: Hold WASD/D-pad for continuous control (20Hz).');
+addLog('SYS', 'Motor: Hold WASD/D-pad/gamepad for continuous control (20Hz).');
