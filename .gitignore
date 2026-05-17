@@ -36,3 +36,7 @@ Thumbs.db
 .env
 .env.local
 .banned_discord_ids
+
+# Guest code persistence
+.guest_codes.json
+data/

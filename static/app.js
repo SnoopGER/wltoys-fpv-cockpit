@@ -31,6 +31,7 @@ const logContainer = $('logContainer');
 function isLoggedIn() { return userRole !== 'guest'; }
 function isAdmin() { return userRole === 'admin'; }
 function isDriverRole() { return userRole === 'admin' || userRole === 'driver'; }
+function canConnect() { return document.body.dataset.canConnect === 'true'; }
 
 function startVideoStream() {
   if (streaming) return;
@@ -49,7 +50,7 @@ function stopVideoStream() {
 
 // ── Connection ───────────────────────────────────────────
 async function doConnect() {
-  if (!isAdmin()) return;
+  if (!canConnect()) return;
   addLog('SYS', 'Connecting...');
   btnConnect.disabled = true;
   setStatus('connecting', 'CONNECTING...');
@@ -82,7 +83,7 @@ async function doConnect() {
 }
 
 async function doDisconnect() {
-  if (!isAdmin()) return;
+  if (!canConnect()) return;
   stopMotor();
   try { await fetch('/api/disconnect', { method: 'POST', credentials: 'include' }); } catch (e) {}
 
@@ -421,6 +422,9 @@ function updateRoleUi() {
   }
   for (const el of document.querySelectorAll('.driver-only')) {
     el.style.display = isDriverRole() ? '' : 'none';
+  }
+  for (const el of document.querySelectorAll('.connect-allowed')) {
+    el.style.display = canConnect() ? '' : 'none';
   }
   for (const el of document.querySelectorAll('.dpad-btn, #btnLights, #speedSlider, #steerSlider')) {
     el.disabled = !canControl;
@@ -1134,7 +1138,7 @@ async function redeemCode() {
     const data = await resp.json();
     if (data.ok) {
       addLog('SYS', '✅ Code redeemed! Reloading...');
-      setTimeout(() => location.reload(), 500);
+      setTimeout(() => { location.href = '/?_=' + Date.now(); }, 500);
     } else {
       addLog('ERR', 'Code error: ' + (data.error || 'invalid'));
       input.value = '';

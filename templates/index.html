@@ -6,7 +6,7 @@
 <title>🏎️ FPV Race Lobby</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body data-user-role="{{ user.role if user else 'guest' }}" data-user-id="{{ user.id if user else '' }}">
+<body data-user-role="{{ user.role if user else 'guest' }}" data-user-id="{{ user.id if user else '' }}" data-can-connect="{{ 'true' if user and user.can_connect else 'false' }}">
 <!-- ─── HEADER ─────────────────────────────────────────── -->
 <header>
   <div class="header-left">
@@ -29,7 +29,7 @@
         {% endif %}
         <span class="auth-divider">|</span>
         <div class="guest-code-box">
-          <input type="text" id="guestCodeInput" placeholder="DRIVE-XXXX-XXXX" class="guest-code-input" maxlength="14" autocomplete="off">
+          <input type="text" id="guestCodeInput" placeholder="DRIVE-XXXX-XXXX" class="guest-code-input" maxlength="20" autocomplete="off">
           <button class="btn btn-green btn-small" id="btnRedeemCode" onclick="redeemCode()">GO</button>
         </div>
       {% endif %}
@@ -74,8 +74,8 @@
     <div class="panel control-panel">
       <div class="panel-header">🔌 CONNECTION</div>
       <div class="button-row">
-        <button class="btn btn-green admin-only" id="btnConnect" onclick="doConnect()">▶ CONNECT</button>
-        <button class="btn btn-red admin-only" id="btnDisconnect" onclick="doDisconnect()" disabled>■ DISCONNECT</button>
+        <button class="btn btn-green connect-allowed" id="btnConnect" onclick="doConnect()">▶ CONNECT</button>
+        <button class="btn btn-red connect-allowed" id="btnDisconnect" onclick="doDisconnect()" disabled>■ DISCONNECT</button>
       </div>
       <div class="info-grid">
         <div class="info-label">Car IP</div><div class="info-value" id="infoCarIp">172.16.11.1</div>

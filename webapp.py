@@ -6,12 +6,14 @@ Flask app providing REST API + MJPEG video stream + lobby auth/control.
 
 import os
 import sys
+import json
 import time
 import secrets
 import threading
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
+from dotenv import load_dotenv
 import requests
 from flask import Flask, Response, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from flask.sessions import SecureCookieSessionInterface
@@ -19,6 +21,9 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 
 # Add current directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Load .env.local if present (Discord OAuth, session secret, etc.)
+load_dotenv(Path(__file__).parent / ".env.local")
 
 from car_protocol import CarProtocol, ConnectionState, SPS_PPS
 from car_protocol import HANDSHAKE_WAKE, HANDSHAKE_TRIGGER, HEARTBEAT
@@ -66,8 +71,47 @@ state_lock = threading.RLock()
 timer_started = False
 
 # Guest Drive Codes: {code: {"created": time, "expires_at": time, "duration": int, "redeemed_by": str|None, "active": bool}}
+GUEST_CODES_FILE = Path(__file__).parent / ".guest_codes.json"
 guest_codes = {}
 guest_codes_lock = threading.Lock()
+
+
+def _save_guest_codes():
+    """Save non-persistent codes to disk. Caller MUST hold guest_codes_lock."""
+    try:
+        data = {k: v for k, v in guest_codes.items() if not v.get("persistent")}
+        with open(GUEST_CODES_FILE, "w") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def _load_guest_codes():
+    try:
+        if GUEST_CODES_FILE.exists():
+            with open(GUEST_CODES_FILE) as f:
+                data = json.load(f)
+            with guest_codes_lock:
+                for code, entry in data.items():
+                    if entry.get("active") and time.time() < entry.get("expires_at", 0):
+                        guest_codes[code] = entry
+    except Exception:
+        pass
+
+
+# Persistent test code — always valid, never consumed
+guest_codes["ZENGARDEN"] = {
+    "created": time.time(),
+    "expires_at": time.time() + (365 * 24 * 3600),  # 1 year
+    "duration": 365 * 24 * 3600,
+    "redeemed_by": None,
+    "active": True,
+    "persistent": True,
+}
+
+# Load saved codes from disk
+_load_guest_codes()
+
 # Active guest sessions: {guest_user_id: {"code": str, "expires_at": time}}
 active_guest_sessions = {}
 
@@ -318,6 +362,7 @@ def generate_guest_code(duration_minutes=10):
             "redeemed_by": None,
             "active": True,
         }
+        _save_guest_codes()
     return code
 
 
@@ -336,6 +381,11 @@ def redeem_guest_code(code):
         # Mark as redeemed
         entry["active"] = False
         entry["redeemed_by"] = "guest"
+        # Persistent codes re-activate immediately
+        if entry.get("persistent"):
+            entry["active"] = True
+            entry["redeemed_by"] = None
+        _save_guest_codes()
         # Generate guest user
         guest_id = f"guest-{code}"
         remaining = int(entry["expires_at"] - time.time())
@@ -344,10 +394,11 @@ def redeem_guest_code(code):
             "username": f"Guest-{code[-4:]}",
             "display_name": f"Guest Driver ({code[-4:]})",
             "avatar": None,
-            "role": "admin",
+            "role": "driver",
             "is_guest": True,
             "guest_expires_at": entry["expires_at"],
             "guest_code": code,
+            "can_connect": True,
         }
         # Track active guest session
         active_guest_sessions[guest_id] = {
@@ -405,6 +456,18 @@ def require_admin():
     return user, None
 
 
+def require_can_connect():
+    """Allow admins and guests with can_connect flag."""
+    user, error = require_user()
+    if error:
+        return None, error
+    if is_admin(user):
+        return user, None
+    if user.get("is_guest") and user.get("can_connect"):
+        return user, None
+    return None, (jsonify({"ok": False, "error": "connect_not_allowed"}), 403)
+
+
 def public_user(user):
     if not user:
         return None
@@ -414,6 +477,13 @@ def public_user(user):
         role = user.get("role", "driver")
     else:
         role = role_for_user(user_id)
+    # can_connect: admins always, guests if flagged, others never
+    if role == "admin":
+        can_connect = True
+    elif user.get("is_guest") and user.get("can_connect"):
+        can_connect = True
+    else:
+        can_connect = False
     return {
         "id": user_id,
         "username": user.get("username", "unknown"),
@@ -421,6 +491,7 @@ def public_user(user):
         "avatar": user.get("avatar"),
         "role": role,
         "is_guest": user.get("is_guest", False),
+        "can_connect": can_connect,
         "connections": len(lobby.get("user_sids", {}).get(user_id, set())),
         "banned": is_banned_user(user_id),
         "active": lobby.get("active_driver") == user_id,
@@ -733,7 +804,13 @@ def discord_callback():
 @app.route("/logout")
 def logout():
     session.clear()
-    return redirect(url_for("index"))
+    resp = redirect(url_for("index"))
+    # Explicitly delete the session cookie so Cloudflare/browser caches clear it
+    resp.delete_cookie("session", domain=public_redirect_host() if request_host() == public_redirect_host() else None)
+    # Also add no-cache headers
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 
 # API Routes
@@ -896,16 +973,60 @@ def api_guest_clear():
 @app.route("/api/redeem-code", methods=["POST"])
 def api_redeem_code():
     """Guest: redeem a drive code to get driver access."""
+    import datetime
     data = request.get_json(silent=True) or {}
     code = data.get("code", "").strip()
+    src = request.remote_addr
+    ua = request.headers.get("User-Agent", "")[:60]
+    with open("/tmp/redeem-debug.log", "a") as _f:
+        _f.write(f"{datetime.datetime.now()} REDEEM from={src} raw_code={code!r} content_type={request.content_type} ua={ua}\n")
     if not code:
+        with open("/tmp/redeem-debug.log", "a") as _f:
+            _f.write(f"  -> REJECTED: no_code_provided, data={data!r}\n")
         return jsonify({"ok": False, "error": "no_code_provided"}), 400
     user, error = redeem_guest_code(code)
     if error:
+        with guest_codes_lock:
+            known = list(guest_codes.keys())
+        with open("/tmp/redeem-debug.log", "a") as _f:
+            _f.write(f"  -> FAILED: error={error!r} known_codes_count={len(known)}\n")
         return jsonify({"ok": False, "error": error}), 403
     session["user"] = user
     session["is_guest"] = True
+    with open("/tmp/redeem-debug.log", "a") as _f:
+        _f.write(f"  -> OK: guest_id={user['id']}\n")
     return jsonify({"ok": True, "user": public_user(user), "expires_at": user["guest_expires_at"]})
+
+
+@app.route("/api/guest/debug", methods=["GET"])
+def api_guest_debug():
+    """Temporary debug: list all codes (local only)."""
+    if not local_request():
+        return jsonify({"ok": False, "error": "local_only"}), 403
+    with guest_codes_lock:
+        codes = {k: {**v, "expires_in": max(0, int(v["expires_at"] - time.time()))} for k, v in guest_codes.items()}
+    return jsonify({"ok": True, "count": len(codes), "codes": codes, "active_sessions": list(active_guest_sessions.keys())})
+
+
+@app.route("/api/guest/debug-generate", methods=["POST"])
+def api_guest_debug_generate():
+    """Temporary: generate a code without admin auth (local only)."""
+    if not local_request():
+        return jsonify({"ok": False, "error": "local_only"}), 403
+    code = generate_guest_code(30)
+    return jsonify({"ok": True, "code": code})
+
+
+@app.route("/api/guest/test", methods=["GET"])
+def api_guest_test():
+    """Public test endpoint — returns a persistent code that never gets consumed."""
+    return jsonify({
+        "ok": True,
+        "code": "ZENGARDEN",
+        "message": "This is a persistent test code. It should always be redeemable.",
+        "known_codes_count": len(guest_codes),
+        "known_codes": list(guest_codes.keys()),
+    })
 
 
 @app.route("/api/guest/remaining", methods=["GET"])
@@ -925,7 +1046,7 @@ def api_guest_remaining():
 
 @app.route("/api/connect", methods=["POST"])
 def api_connect():
-    user, error = require_admin()
+    user, error = require_can_connect()
     if error:
         return error
     init_car()
@@ -938,7 +1059,7 @@ def api_connect():
 
 @app.route("/api/disconnect", methods=["POST"])
 def api_disconnect():
-    user, error = require_admin()
+    user, error = require_can_connect()
     if error:
         return error
     global car, decoder
