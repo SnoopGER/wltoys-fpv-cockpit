@@ -627,10 +627,17 @@ def remove_user_from_lobby(user_id, reason, disconnect_sockets=True):
 
 
 def kick_user(user_id, reason="admin kick"):
-    # Also invalidate guest sessions so they can't re-authenticate
+    # For guests: revoke their code and invalidate session
     if user_id.startswith("guest-"):
         with guest_codes_lock:
-            active_guest_sessions.pop(user_id, None)
+            guest_info = active_guest_sessions.pop(user_id, None)
+            if guest_info:
+                code = guest_info.get("code")
+                if code and code in guest_codes:
+                    # Revoke the code (mark inactive, won't work if re-entered)
+                    guest_codes[code]["active"] = False
+                    guest_codes[code]["redeemed_by"] = "kicked"
+                    _save_guest_codes()
     # Notify the user they've been kicked via socket.io
     for sid in list(lobby.get("user_sids", {}).get(user_id, set())):
         try:
