@@ -7,12 +7,14 @@ Flask app providing REST API + MJPEG video stream + lobby auth/control.
 import os
 import sys
 import time
+import secrets
 import threading
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import requests
 from flask import Flask, Response, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from flask.sessions import SecureCookieSessionInterface
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
 # Add current directory to path
@@ -24,6 +26,36 @@ from video_decoder import VideoDecoder
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = os.environ.get("SESSION_SECRET", os.urandom(32))
+# SameSite=Lax is enough for Discord's top-level OAuth callback redirect and avoids
+# the cross-site cookie behavior that SameSite=None would require.
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+
+class HostAwareSessionInterface(SecureCookieSessionInterface):
+    """Use secure public cookies without breaking HTTP LAN sessions.
+
+    The dashboard serves two legitimate origins from one Flask process:
+    - https://race.zen-rc.net through Cloudflare (public route)
+    - http://192.168.178.142:5555 or localhost on the LAN (low-latency route)
+
+    A single global Secure=true/Domain=race.zen-rc.net cookie would prevent LAN HTTP
+    login from working. Keeping Domain unset for LAN creates a host-only cookie for
+    the IP/localhost origin, while the public host still gets Secure=true.
+    """
+
+    def get_cookie_secure(self, app):
+        return request_host() == public_redirect_host()
+
+    def get_cookie_domain(self, app):
+        if request_host() == public_redirect_host():
+            return public_redirect_host()
+        return None
+
+    def get_cookie_samesite(self, app):
+        return "Lax"
+
+
+app.session_interface = HostAwareSessionInterface()
 socketio = SocketIO(app, async_mode="threading", manage_session=False)
 
 # Global State
@@ -34,6 +66,7 @@ state_lock = threading.RLock()
 timer_started = False
 
 DISCORD_API = "https://discord.com/api"
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://race.zen-rc.net").rstrip("/")
 COMMANDS = {
     "stop",
     "forward",
@@ -45,6 +78,83 @@ COMMANDS = {
     "reverse_left",
     "reverse_right",
 }
+
+
+def request_host():
+    """Return the current request host in lower-case, including port if present."""
+    return request.host.lower()
+
+
+def uri_host(uri):
+    """Return host[:port] from an absolute URI."""
+    return urlparse(uri).netloc.lower()
+
+
+def redirect_uri_from_base_url(base_url):
+    return f"{base_url.rstrip('/')}/auth/discord/callback"
+
+
+def configured_redirect_uris():
+    """Return all Discord callback URIs allowed by local config.
+
+    DISCORD_REDIRECT_URIS is the preferred comma-separated list. The older
+    DISCORD_REDIRECT_URI remains supported and is included for backwards
+    compatibility, so existing single-route deployments keep working.
+    """
+    candidates = []
+    candidates.extend(item.strip() for item in os.environ.get("DISCORD_REDIRECT_URIS", "").split(","))
+    single_uri = os.environ.get("DISCORD_REDIRECT_URI", "").strip()
+    if single_uri:
+        candidates.append(single_uri)
+    if not candidates:
+        candidates.append(redirect_uri_from_base_url(PUBLIC_BASE_URL))
+
+    seen = set()
+    uris = []
+    for uri in candidates:
+        if not uri or uri in seen:
+            continue
+        parsed = urlparse(uri)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.path != "/auth/discord/callback":
+            continue
+        seen.add(uri)
+        uris.append(uri)
+    return uris
+
+
+def public_redirect_uri():
+    """Return the safe public Cloudflare redirect URI used as fallback."""
+    explicit = os.environ.get("DISCORD_PUBLIC_REDIRECT_URI", "").strip()
+    if explicit:
+        return explicit
+    legacy = os.environ.get("DISCORD_REDIRECT_URI", "").strip()
+    if legacy and uri_host(legacy) == uri_host(redirect_uri_from_base_url(PUBLIC_BASE_URL)):
+        return legacy
+    for uri in configured_redirect_uris():
+        if urlparse(uri).scheme == "https" and uri_host(uri) == uri_host(redirect_uri_from_base_url(PUBLIC_BASE_URL)):
+            return uri
+    for uri in configured_redirect_uris():
+        if urlparse(uri).scheme == "https":
+            return uri
+    return redirect_uri_from_base_url(PUBLIC_BASE_URL)
+
+
+def public_redirect_host():
+    return uri_host(public_redirect_uri())
+
+
+def redirect_uri_for_request():
+    """Select the Discord callback URI for the origin that started login.
+
+    Known LAN hosts keep the OAuth round-trip on LAN. Unknown hosts always fall
+    back to the configured public Cloudflare URI, which avoids opening arbitrary
+    redirect targets and keeps the public route locked to Discord's allowlist.
+    """
+    host = request_host()
+    for uri in configured_redirect_uris():
+        if uri_host(uri) == host:
+            return uri
+    return public_redirect_uri()
 
 
 def csv_ids(name):
@@ -437,15 +547,24 @@ def static_files(filename):
 @app.route("/login")
 def login():
     client_id = os.environ.get("DISCORD_CLIENT_ID")
-    redirect_uri = os.environ.get("DISCORD_REDIRECT_URI")
+    redirect_uri = redirect_uri_for_request()
     if not client_id or not os.environ.get("DISCORD_CLIENT_SECRET") or not redirect_uri:
-        return "Discord OAuth is not configured. Set DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, and DISCORD_REDIRECT_URI.", 503
+        return "Discord OAuth is not configured. Set DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, and DISCORD_REDIRECT_URI(S).", 503
+
+    # Store both values in the Flask session so the callback can prove it belongs
+    # to this browser and can exchange the code with the exact redirect_uri that
+    # Discord saw during /login. This keeps LAN and Cloudflare sessions separate.
+    oauth_state = secrets.token_urlsafe(32)
+    session["discord_oauth_state"] = oauth_state
+    session["discord_oauth_redirect_uri"] = redirect_uri
+
     params = urlencode({
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": "identify",
         "prompt": "none",
+        "state": oauth_state,
     })
     return redirect(f"{DISCORD_API}/oauth2/authorize?{params}")
 
@@ -456,6 +575,16 @@ def discord_callback():
     if not code:
         return redirect(url_for("index"))
 
+    expected_state = session.pop("discord_oauth_state", None)
+    received_state = request.args.get("state")
+    if not expected_state or not received_state or not secrets.compare_digest(expected_state, received_state):
+        session.pop("discord_oauth_redirect_uri", None)
+        return "Invalid Discord OAuth state.", 400
+
+    redirect_uri = session.pop("discord_oauth_redirect_uri", None) or redirect_uri_for_request()
+    if redirect_uri not in configured_redirect_uris():
+        redirect_uri = public_redirect_uri()
+
     token_resp = requests.post(
         f"{DISCORD_API}/oauth2/token",
         data={
@@ -463,7 +592,7 @@ def discord_callback():
             "client_secret": os.environ.get("DISCORD_CLIENT_SECRET"),
             "grant_type": "authorization_code",
             "code": code,
-            "redirect_uri": os.environ.get("DISCORD_REDIRECT_URI"),
+            "redirect_uri": redirect_uri,
         },
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         timeout=10,

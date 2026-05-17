@@ -62,7 +62,10 @@ hostname -I | awk '{print $1}'
 | `FPV_LISTEN_PORT` | `1234` | UDP port for video stream |
 | `DISCORD_CLIENT_ID` | unset | Discord OAuth application client ID |
 | `DISCORD_CLIENT_SECRET` | unset | Discord OAuth client secret. Keep this local and never commit it. |
-| `DISCORD_REDIRECT_URI` | unset | Public callback URL, for example `https://<tunnel>/auth/discord/callback` |
+| `DISCORD_REDIRECT_URI` | unset | Legacy single public callback URL, for example `https://<tunnel>/auth/discord/callback` |
+| `DISCORD_REDIRECT_URIS` | unset | Comma-separated allowlist of callback URLs for public, LAN, and localhost access. Hosts must match the browser route that starts `/login`. |
+| `DISCORD_PUBLIC_REDIRECT_URI` | `DISCORD_REDIRECT_URI` or HTTPS public URL | Safe fallback callback URL for unknown hosts. Use the Cloudflare/public HTTPS route. |
+| `PUBLIC_BASE_URL` | `https://race.zen-rc.net` | Public base URL used to derive the fallback callback when no explicit public redirect is set. |
 | `SESSION_SECRET` | random per process | Flask session signing secret; set a stable long random value in production |
 | `ADMIN_DISCORD_IDS` | unset | Comma-separated Discord user IDs with admin controls |
 | `ALLOWED_DISCORD_IDS` | unset | Comma-separated allowlist. Use `user_id` for drivers or `user_id:spectator` for spectator-only users |
@@ -78,10 +81,13 @@ FPV_CAR_IP=172.16.11.1 bash start.sh
 ### Discord Race Lobby Setup
 
 1. Create a Discord application at <https://discord.com/developers/applications>.
-2. Add a redirect URL matching your public tunnel, for example:
+2. Add redirect URLs for every route you want Discord to return to. For example, a public Cloudflare route plus LAN/localhost callbacks:
    ```text
    https://your-tunnel.example.com/auth/discord/callback
+   http://192.168.178.142:5555/auth/discord/callback
+   http://localhost:5555/auth/discord/callback
    ```
+   The app selects the matching callback from the request host that starts `/login`; unknown hosts safely fall back to the public HTTPS callback.
 3. Create a local env file that is **not committed**:
    ```bash
    touch .env.local
@@ -92,6 +98,8 @@ FPV_CAR_IP=172.16.11.1 bash start.sh
    DISCORD_CLIENT_ID=your_client_id
    DISCORD_CLIENT_SECRET=your_client_secret
    DISCORD_REDIRECT_URI=https://your-tunnel.example.com/auth/discord/callback
+   DISCORD_REDIRECT_URIS=https://your-tunnel.example.com/auth/discord/callback,http://192.168.178.142:5555/auth/discord/callback,http://localhost:5555/auth/discord/callback
+   DISCORD_PUBLIC_REDIRECT_URI=https://your-tunnel.example.com/auth/discord/callback
    SESSION_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
    ADMIN_DISCORD_IDS=your_discord_user_id
    ALLOWED_DISCORD_IDS=your_discord_user_id
@@ -102,7 +110,7 @@ FPV_CAR_IP=172.16.11.1 bash start.sh
    ```
 5. Load the file safely before starting the app, or use a wrapper script such as `start-v2.sh` in a local test deployment.
 
-For a Cloudflare Quick Tunnel, point the tunnel service at the Flask app on `http://<kali-lan-ip>:5555` and configure Discord with the public HTTPS callback URL.
+For a Cloudflare Quick Tunnel, point the tunnel service at the Flask app on `http://<kali-lan-ip>:5555` and configure Discord with the public HTTPS callback URL. For LAN driving, also add the LAN callback URL in Discord and in `DISCORD_REDIRECT_URIS`; starting login from the LAN host will then return to the LAN host instead of the Cloudflare route.
 
 ### Docker (Windows / Mac / Linux)
 
