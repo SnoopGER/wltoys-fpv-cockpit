@@ -194,12 +194,12 @@ function setupTouchControls() {
   if (btnBrake) {
     btnBrake.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      startCommand('backward');
+      startCommand('reverse');
       btnBrake.classList.add('active');
     });
     btnBrake.addEventListener('touchstart', (e) => {
       e.preventDefault();
-      startCommand('backward');
+      startCommand('reverse');
       btnBrake.classList.add('active');
     });
     btnBrake.addEventListener('mouseup', () => {
