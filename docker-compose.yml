@@ -1,0 +1,10 @@
+services:
+  fpv-cockpit:
+    build: .
+    image: wltoys-fpv-cockpit:latest
+    container_name: fpv-cockpit
+    network_mode: host          # Required on Linux — car sends UDP directly to host IP
+    environment:
+      - FPV_CAR_IP=172.16.11.1
+      - FPV_LISTEN_PORT=1234
+    restart: unless-stopped

@@ -63,6 +63,23 @@ hostname -I | awk '{print $1}'
 FPV_CAR_IP=172.16.11.1 bash start.sh
 ```
 
+### Docker (Windows / Mac / Linux)
+
+```bash
+# Clone and connect to car WiFi first, then:
+cd wltoys-fpv-cockpit
+
+# Linux (requires host networking for UDP)
+docker compose up --build
+
+# Windows Docker Desktop (host networking not supported)
+docker compose -f docker-compose.windows.yml up --build
+```
+
+Open **http://localhost:5555** in your browser.
+
+> **⚠️ Windows note:** `network_mode: host` does not work on Docker Desktop for Windows. Use the `docker-compose.windows.yml` variant which maps ports explicitly. Make sure your PC is connected to the car's WiFi before starting the container.
+
 ---
 
 ## Controls
@@ -203,17 +220,23 @@ wltoys-fpv-cockpit/
 ├── README.md                   ← You are here
 ├── LICENSE                     ← MIT License
 ├── .gitignore
+├── .dockerignore
+├── Dockerfile                  ← Docker image definition
+├── docker-compose.yml          ← Linux (host networking)
+├── docker-compose.windows.yml  ← Windows Docker Desktop
+├── requirements.txt            ← Python dependencies
 ├── start.sh                    ← Launcher script
+├── start-fpv-debug.sh          ← LAN launcher script
 ├── CAR.pcap                    ← Reference packet capture from the original app
 ├── CAR WIFI INFO               ← Car connection reference
 ├── car_protocol.py             ← UDP protocol implementation
-├── video_decoder.py            ← H.264 → JPEG decoder (via PyAV - in-process H.264 decode)
+├── video_decoder.py            ← H.264 → JPEG decoder (via PyAV)
 ├── webapp.py                   ← Flask web server (REST API + MJPEG + SSE)
 ├── templates/
 │   └── index.html              ← Cockpit UI
 └── static/
     ├── style.css               ← Dark racing theme
-    └── app.js                  ← Frontend logic (controls, polling, logs)
+    └── app.js                  ← Frontend logic (controls, gamepad, polling, logs)
 ```
 
 ## Architecture
