@@ -169,6 +169,31 @@ async function sendMotorCmd(command) {
   } catch (e) {}
 }
 
+// ── Lights Toggle ────────────────────────────────────────
+let lightsOn = false;
+
+async function toggleLights() {
+  if (!connected) return;
+  lightsOn = !lightsOn;
+  try {
+    const resp = await fetch('/api/lights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ on: lightsOn }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      addLog('TX', '💡 Lights ' + (lightsOn ? 'ON' : 'OFF'));
+    } else {
+      addLog('ERR', 'Lights toggle failed: ' + (data.error || 'unknown'));
+      lightsOn = !lightsOn;  // Revert on failure
+    }
+  } catch (e) {
+    addLog('ERR', 'Lights error: ' + e.message);
+    lightsOn = !lightsOn;
+  }
+}
+
 // ── Raw Sender ───────────────────────────────────────────
 async function sendRaw() {
   const hex = $('rawHex').value.trim();
@@ -400,22 +425,38 @@ function pollGamepad() {
     case 'playstation': {
       // Left stick: Y=throttle, X=steer
       const left = applyDeadzone(gp.axes[0] || 0, gp.axes[1] || 0);
-      // Right trigger as alternative throttle (axis 5 on Xbox, range -1..1 or 0..1)
-      const rawRT = gp.axes[5] !== undefined ? gp.axes[5] : 0;
-      const rtNorm = rawRT > 0 ? rawRT : 0;
       // Right stick X as alternative steer (axis 2 = RS X, axis 3 = RS Y)
       const rightSteer = applyDeadzone1D(gp.axes[2] || 0);
+      // Triggers: axis 4 = LT (brake), axis 5 = RT (accelerate)
+      // Range: -1 (released) to +1 (pressed) on most browsers
+      const rawRT = gp.axes[5] !== undefined ? (gp.axes[5] + 1) / 2 : 0;  // Normalize to 0..1
+      const rawLT = gp.axes[4] !== undefined ? (gp.axes[4] + 1) / 2 : 0;  // Normalize to 0..1
+      const rtAccel = rawRT > 0.05 ? rawRT : 0;  // RT = accelerate
+      const ltBrake = rawLT > 0.05 ? rawLT : 0;  // LT = brake/reverse
 
       const leftMag = Math.sqrt(left.x * left.x + left.y * left.y);
-      if (leftMag > 0.01) {
-        throttleVal = left.y;   // Y: -1=up/forward, +1=down/reverse
-        steerVal = left.x;
+      const rightMag = Math.abs(rightSteer);
+
+      // Throttle: triggers override left stick Y when pressed
+      if (rtAccel > 0.01) {
+        throttleVal = -rtAccel;  // RT = forward (negative)
         hasInput = true;
-      } else if (rtNorm > 0.01 || Math.abs(rightSteer) > 0.01) {
-        throttleVal = -rtNorm;  // RT: positive = forward
-        steerVal = rightSteer;
+      } else if (ltBrake > 0.01) {
+        throttleVal = ltBrake;  // LT = reverse (positive)
+        hasInput = true;
+      } else if (leftMag > 0.01) {
+        throttleVal = left.y;   // Left stick Y: -1=forward, +1=reverse
         hasInput = true;
       }
+
+      // Steering: right stick X overrides left stick X when active
+      if (rightMag > 0.01) {
+        steerVal = rightSteer;
+      } else if (leftMag > 0.01) {
+        steerVal = left.x;
+      }
+
+      if (Math.abs(steerVal) > 0.01) hasInput = true;
       break;
     }
 
@@ -626,6 +667,9 @@ function handleGamepadButtons(gp) {
               addLog('SYS', '🎮 RB: Speed → ' + val + '%');
             }
           }
+          break;
+        case 13: // D-pad down — toggle lights
+          toggleLights();
           break;
       }
     }

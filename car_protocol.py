@@ -368,6 +368,31 @@ class CarProtocol:
         except Exception as e:
             self.log("ERROR", f"Command failed: {e}")
             return False
+
+    def toggle_lights(self, on: bool = True) -> bool:
+        """Toggle car headlights/LEDs.
+
+        NOTE: The exact light command is NOT documented in the protocol.
+        This sends a common WLtoys light toggle pattern (byte 8 = 0x67).
+        If lights don't respond, capture the light button press from the
+        Android app (com.lg.wltechfpvcar) and update the hex below.
+        """
+        if self.state not in (ConnectionState.CONNECTED, ConnectionState.STREAMING):
+            self.log("WARN", "Not connected — cannot toggle lights")
+            return False
+
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Attempt: command type 0x67, byte 9 = 0x01 (on) or 0x00 (off)
+            light_byte = 0x01 if on else 0x00
+            cmd = bytes.fromhex("ca47d50000000000") + bytes([0x67, light_byte, 0x80, 0x80, 0x00, 0x00, 0x00, 0x99])
+            sock.sendto(cmd, (self.car_ip, 23458))
+            sock.close()
+            self.log("TX", f"Lights {'ON' if on else 'OFF'} [{cmd.hex()}]")
+            return True
+        except Exception as e:
+            self.log("ERROR", f"Lights command failed: {e}")
+            return False
     
     def get_frame(self, timeout: float = 1.0) -> Optional[bytes]:
         """Get the next complete H.264 frame (blocking)."""

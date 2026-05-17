@@ -92,6 +92,15 @@ def api_command():
     success = car.send_command(cmd, speed=speed, steer_range=steer_range)
     return jsonify({"ok": success, "command": cmd, "speed": speed, "steer_range": steer_range})
 
+@app.route('/api/lights', methods=['POST'])
+def api_lights():
+    """Toggle car lights. Body: {"on": true}"""
+    init_car()
+    data = request.get_json(silent=True) or {}
+    on = data.get('on', True)
+    success = car.toggle_lights(on=on)
+    return jsonify({"ok": success, "lights": on})
+
 @app.route('/api/send_raw', methods=['POST'])
 def api_send_raw():
     """Send a raw hex packet to the car. Body: {"hex": "...", "port": 23458}"""
