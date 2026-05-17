@@ -11,6 +11,8 @@ Reverse-engineered from the Android app (`com.lg.wltechfpvcar`). No encryption, 
 ## Features
 
 - **Live FPV video** — H.264 stream decoded to MJPEG in-browser (~25fps)
+- **Discord OAuth race lobby** — allowlisted Discord users can join the driver queue; admins can pause, emergency-stop, advance drivers, and tune limits
+- **Remote-safe controls** — stale command rejection, active-driver validation, max speed cap, and admin-only car connect/disconnect
 - **Motor control** — WASD keys + D-pad buttons at 20Hz (matches original app rate)
 - **Dual-axis combos** — steer while accelerating (W+A, W+D, S+A, S+D)
 - **Speed & steering sliders** — adjust throttle power (5–100%) and steering angle (5–100%)
@@ -57,11 +59,48 @@ hostname -I | awk '{print $1}'
 |----------|---------|-------------|
 | `FPV_CAR_IP` | `172.16.11.1` | Car's WiFi IP address |
 | `FPV_LISTEN_PORT` | `1234` | UDP port for video stream |
+| `DISCORD_CLIENT_ID` | unset | Discord OAuth application client ID |
+| `DISCORD_CLIENT_SECRET` | unset | Discord OAuth client secret. Keep this local and never commit it. |
+| `DISCORD_REDIRECT_URI` | unset | Public callback URL, for example `https://<tunnel>/auth/discord/callback` |
+| `SESSION_SECRET` | random per process | Flask session signing secret; set a stable long random value in production |
+| `ADMIN_DISCORD_IDS` | unset | Comma-separated Discord user IDs with admin controls |
+| `ALLOWED_DISCORD_IDS` | unset | Comma-separated allowlist. Use `user_id` for drivers or `user_id:spectator` for spectator-only users |
+| `DEFAULT_DRIVE_SECONDS` | `120` | Default active-driver session length, clamped to 15–3600 seconds |
+| `MAX_REMOTE_SPEED_PERCENT` | `70` | Server-side speed cap for remote drivers, clamped to 5–100% |
 
 ```bash
 # Example: custom car IP
 FPV_CAR_IP=172.16.11.1 bash start.sh
 ```
+
+### Discord Race Lobby Setup
+
+1. Create a Discord application at <https://discord.com/developers/applications>.
+2. Add a redirect URL matching your public tunnel, for example:
+   ```text
+   https://your-tunnel.example.com/auth/discord/callback
+   ```
+3. Create a local env file that is **not committed**:
+   ```bash
+   touch .env.local
+   chmod 600 .env.local
+   ```
+4. Put the OAuth and lobby settings in `.env.local`:
+   ```bash
+   DISCORD_CLIENT_ID=your_client_id
+   DISCORD_CLIENT_SECRET=your_client_secret
+   DISCORD_REDIRECT_URI=https://your-tunnel.example.com/auth/discord/callback
+   SESSION_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
+   ADMIN_DISCORD_IDS=your_discord_user_id
+   ALLOWED_DISCORD_IDS=your_discord_user_id
+   DEFAULT_DRIVE_SECONDS=120
+   MAX_REMOTE_SPEED_PERCENT=70
+   FPV_CAR_IP=172.16.11.1
+   FPV_LISTEN_PORT=1234
+   ```
+5. Load the file safely before starting the app, or use a wrapper script such as `start-v2.sh` in a local test deployment.
+
+For a Cloudflare Quick Tunnel, point the tunnel service at the Flask app on `http://<kali-lan-ip>:5555` and configure Discord with the public HTTPS callback URL.
 
 ### Docker (Windows / Mac / Linux)
 
@@ -269,6 +308,13 @@ The H.264 video decoder evolved through several iterations:
 - **v4:** file-based ffmpeg subprocess per frame (~8-10fps)
 - **v9:** PyAV in-process decode + PIL JPEG encode (<1ms per frame, ~25fps)
 - **Key insight:** H.264 P-frames need the preceding keyframe in the bitstream to decode correctly
+
+## Current V2 Roadmap
+
+The Discord-authenticated V2 race lobby is working in local testing. The next performance pass is video-stream focused:
+
+1. Make LAN streaming butter smooth first: stabilize frame pacing, reduce jitter, and verify decode/encode latency on the local network before changing the remote path.
+2. After LAN output is smooth, refine web/Cloudflare streaming: tune browser delivery, remote buffering, and tunnel behavior without compromising local control latency.
 
 ---
 
