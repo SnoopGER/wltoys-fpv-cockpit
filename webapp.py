@@ -8,6 +8,7 @@ import os
 import sys
 import time
 import threading
+from pathlib import Path
 from urllib.parse import urlencode
 
 import requests
@@ -84,6 +85,22 @@ ALLOWED_ROLES = csv_role_map("ALLOWED_DISCORD_IDS")
 ALLOWED_IDS = set(ALLOWED_ROLES)
 DEFAULT_DRIVE_SECONDS = env_int("DEFAULT_DRIVE_SECONDS", 120, 15, 3600)
 MAX_REMOTE_SPEED_PERCENT = env_int("MAX_REMOTE_SPEED_PERCENT", 70, 5, 100)
+BANNED_IDS_FILE = Path(os.environ.get(
+    "BANNED_DISCORD_IDS_FILE",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), ".banned_discord_ids"),
+))
+
+
+def load_banned_ids():
+    if not BANNED_IDS_FILE.exists():
+        return set()
+    return {line.strip() for line in BANNED_IDS_FILE.read_text(encoding="utf-8").splitlines() if line.strip()}
+
+
+def save_banned_ids():
+    ids = sorted(lobby.get("banned_ids", set()))
+    BANNED_IDS_FILE.write_text("\n".join(ids) + ("\n" if ids else ""), encoding="utf-8")
+    BANNED_IDS_FILE.chmod(0o600)
 
 lobby = {
     "paused": False,
@@ -96,6 +113,7 @@ lobby = {
     "users": {},
     "sid_to_user": {},
     "user_sids": {},
+    "banned_ids": load_banned_ids(),
 }
 
 
@@ -117,6 +135,9 @@ def current_user():
     user = session.get("user")
     if not user:
         return None
+    if is_banned_user(user["id"]):
+        session.clear()
+        return None
     if not is_allowed_user(user["id"]):
         return None
     user = dict(user)
@@ -124,8 +145,12 @@ def current_user():
     return user
 
 
+def is_banned_user(user_id):
+    return user_id in lobby.get("banned_ids", set())
+
+
 def is_allowed_user(user_id):
-    return user_id in ADMIN_IDS or user_id in ALLOWED_ROLES
+    return not is_banned_user(user_id) and (user_id in ADMIN_IDS or user_id in ALLOWED_ROLES)
 
 
 def role_for_user(user_id):
@@ -161,12 +186,17 @@ def require_admin():
 def public_user(user):
     if not user:
         return None
+    user_id = user["id"]
     return {
-        "id": user["id"],
+        "id": user_id,
         "username": user.get("username", "unknown"),
         "display_name": user.get("display_name") or user.get("username", "unknown"),
         "avatar": user.get("avatar"),
-        "role": role_for_user(user["id"]),
+        "role": role_for_user(user_id),
+        "connections": len(lobby.get("user_sids", {}).get(user_id, set())),
+        "banned": is_banned_user(user_id),
+        "active": lobby.get("active_driver") == user_id,
+        "queued": user_id in lobby.get("queue", []),
     }
 
 
@@ -191,6 +221,7 @@ def lobby_snapshot():
     init_car()
     with state_lock:
         users = [public_user(u) for u in lobby["users"].values()]
+        banned = sorted(lobby.get("banned_ids", set()))
         active_id = lobby["active_driver"]
         return {
             "ok": True,
@@ -202,6 +233,7 @@ def lobby_snapshot():
             "queue": [public_user(lobby["users"].get(uid, {"id": uid, "username": uid})) for uid in lobby["queue"]],
             "connected_spectators": [u for u in users if u and u["role"] == "spectator"],
             "connected_users": users,
+            "banned_users": banned,
             "car_online": car_online(),
             "max_speed_percent": lobby["max_speed_percent"],
             "session_duration": lobby["session_duration"],
@@ -244,9 +276,70 @@ def next_driver_locked(reason):
     while lobby["queue"]:
         uid = lobby["queue"].pop(0)
         user = lobby["users"].get(uid)
-        if user and can_drive(user):
+        if user and can_drive(user) and not is_banned_user(uid):
             start_driver(uid)
             break
+
+
+def queued_driver_available():
+    return any(
+        uid in lobby["users"] and can_drive(lobby["users"][uid]) and not is_banned_user(uid)
+        for uid in lobby["queue"]
+    )
+
+
+def advance_driver_if_due_locked(reason):
+    """Advance only when the active driver's timer expired and another driver is queued."""
+    if not lobby["active_driver"] or lobby["paused"] or seconds_remaining() > 0:
+        return False
+    if not queued_driver_available():
+        return False
+    next_driver_locked(reason)
+    return True
+
+
+def disconnect_user_sockets(user_id):
+    for sid in list(lobby.get("user_sids", {}).get(user_id, set())):
+        try:
+            socketio.server.disconnect(sid, namespace="/")
+        except Exception:
+            pass
+
+
+def remove_user_from_lobby(user_id, reason, disconnect_sockets=True):
+    changed = False
+    if disconnect_sockets:
+        disconnect_user_sockets(user_id)
+    remove_from_queue(user_id)
+    if user_id in lobby["users"]:
+        lobby["users"].pop(user_id, None)
+        changed = True
+    for sid in list(lobby.get("user_sids", {}).get(user_id, set())):
+        lobby["sid_to_user"].pop(sid, None)
+    lobby["user_sids"].pop(user_id, None)
+    if lobby["active_driver"] == user_id:
+        next_driver_locked(reason)
+        changed = True
+    return changed
+
+
+def kick_user(user_id, reason="admin kick"):
+    return remove_user_from_lobby(user_id, reason, disconnect_sockets=True)
+
+
+def ban_user(user_id, reason="admin ban"):
+    lobby.setdefault("banned_ids", set()).add(user_id)
+    remove_user_from_lobby(user_id, reason, disconnect_sockets=True)
+    save_banned_ids()
+    return True
+
+
+def unban_user(user_id):
+    if user_id not in lobby.get("banned_ids", set()):
+        return False
+    lobby["banned_ids"].discard(user_id)
+    save_banned_ids()
+    return True
 
 
 def ensure_timer():
@@ -262,11 +355,13 @@ def timer_loop():
     while True:
         time.sleep(1)
         changed = False
+        should_broadcast = False
         with state_lock:
-            if lobby["active_driver"] and not lobby["paused"] and seconds_remaining() <= 0:
-                next_driver_locked("driver timer expired")
-                changed = True
-        if changed:
+            if lobby["active_driver"] and not lobby["paused"]:
+                changed = advance_driver_if_due_locked("driver timer expired")
+                # Broadcast every second while a session is active so clients see the countdown.
+                should_broadcast = True
+        if changed or should_broadcast:
             broadcast_lobby()
 
 
@@ -388,6 +483,9 @@ def discord_callback():
         "display_name": discord_user.get("global_name") or discord_user.get("username", "unknown"),
         "avatar": discord_user.get("avatar"),
     }
+    if is_banned_user(user["id"]):
+        session.clear()
+        return "This Discord account is banned from this cockpit.", 403
     if not is_allowed_user(user["id"]):
         session.clear()
         return "This Discord account is not allowlisted for this cockpit.", 403
@@ -426,6 +524,7 @@ def api_queue_join():
             start_driver(user["id"])
         elif user["id"] != lobby["active_driver"] and user["id"] not in lobby["queue"]:
             lobby["queue"].append(user["id"])
+            advance_driver_if_due_locked("queued driver joined after timer expired")
     broadcast_lobby()
     return jsonify(lobby_snapshot())
 
@@ -464,6 +563,23 @@ def api_admin(action):
                 lobby["emergency_stop"] = False
         elif action in {"next_driver", "kick_current_driver"}:
             next_driver_locked(f"admin {action}")
+        elif action == "kick_user":
+            target_id = str(data.get("user_id", "")).strip()
+            if not target_id:
+                return jsonify({"ok": False, "error": "missing_user_id"}), 400
+            kick_user(target_id, "admin kick")
+        elif action == "ban_user":
+            target_id = str(data.get("user_id", "")).strip()
+            if not target_id:
+                return jsonify({"ok": False, "error": "missing_user_id"}), 400
+            if target_id in ADMIN_IDS:
+                return jsonify({"ok": False, "error": "cannot_ban_admin"}), 403
+            ban_user(target_id, "admin ban")
+        elif action == "unban_user":
+            target_id = str(data.get("user_id", "")).strip()
+            if not target_id:
+                return jsonify({"ok": False, "error": "missing_user_id"}), 400
+            unban_user(target_id)
         elif action == "clear_queue":
             lobby["queue"] = []
         elif action == "set_max_speed":

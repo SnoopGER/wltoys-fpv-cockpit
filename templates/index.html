@@ -124,6 +124,17 @@
         <button class="btn btn-blue" onclick="setAdminSpeed()">SET SPEED</button>
         <button class="btn btn-blue" onclick="setSessionDuration()">SET TIMER</button>
       </div>
+      <div class="admin-users">
+        <div class="queue-title">Connected Discord Accounts</div>
+        <div id="adminUserList" class="admin-user-list"></div>
+        <div class="queue-title">Banned Discord IDs</div>
+        <div id="adminBanList" class="admin-ban-list"></div>
+      </div>
+      <div class="raw-send">
+        <input type="text" id="adminBanId" placeholder="Discord ID to ban/unban" class="hex-input">
+        <button class="btn btn-red" onclick="banDiscordIdInput()">BAN ID</button>
+        <button class="btn btn-blue" onclick="unbanDiscordIdInput()">UNBAN ID</button>
+      </div>
     </div>
     {% endif %}
 

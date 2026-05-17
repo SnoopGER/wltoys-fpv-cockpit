@@ -35,3 +35,4 @@ Thumbs.db
 # Environment / secrets
 .env
 .env.local
+.banned_discord_ids

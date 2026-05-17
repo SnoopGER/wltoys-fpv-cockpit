@@ -258,6 +258,8 @@ function renderLobby(data) {
     }
   }
 
+  renderAdminUsers(data);
+
   if (data.car_online) {
     setStatus('connected', 'CONNECTED');
     if (isLoggedIn()) startVideoStream();
@@ -316,8 +318,92 @@ async function adminAction(action, body = {}) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (resp.ok) renderLobby(await resp.json());
-  } catch (e) {}
+    const data = await resp.json();
+    if (resp.ok) {
+      renderLobby(data);
+    } else {
+      addLog('WARN', 'Admin action failed: ' + (data.error || action));
+    }
+  } catch (e) {
+    addLog('ERR', 'Admin action error: ' + e.message);
+  }
+}
+
+function renderAdminUsers(data) {
+  if (!isAdmin()) return;
+  const list = $('adminUserList');
+  if (list) {
+    list.innerHTML = '';
+    for (const user of data.connected_users || []) {
+      const row = document.createElement('div');
+      row.className = 'admin-user-row';
+
+      const meta = document.createElement('div');
+      meta.className = 'admin-user-meta';
+      const tags = [];
+      if (user.active) tags.push('active');
+      if (user.queued) tags.push('queued');
+      tags.push(user.role || 'unknown');
+      meta.innerHTML = `<strong>${escapeHtml(userLabel(user))}</strong><span>${escapeHtml(user.id)} · ${escapeHtml(tags.join(' · '))} · ${user.connections || 0} conn</span>`;
+
+      const buttons = document.createElement('div');
+      buttons.className = 'admin-user-actions';
+      const kick = document.createElement('button');
+      kick.className = 'btn btn-small btn-blue';
+      kick.textContent = 'KICK';
+      kick.onclick = () => adminAction('kick_user', { user_id: user.id });
+      const ban = document.createElement('button');
+      ban.className = 'btn btn-small btn-red';
+      ban.textContent = 'BAN';
+      ban.disabled = user.role === 'admin';
+      ban.onclick = () => adminAction('ban_user', { user_id: user.id });
+      buttons.append(kick, ban);
+      row.append(meta, buttons);
+      list.appendChild(row);
+    }
+    if (!list.children.length) {
+      const empty = document.createElement('div');
+      empty.className = 'dim-item admin-empty';
+      empty.textContent = 'none connected';
+      list.appendChild(empty);
+    }
+  }
+
+  const banList = $('adminBanList');
+  if (banList) {
+    banList.innerHTML = '';
+    for (const id of data.banned_users || []) {
+      const row = document.createElement('div');
+      row.className = 'admin-user-row';
+      const meta = document.createElement('div');
+      meta.className = 'admin-user-meta';
+      meta.innerHTML = `<strong>${escapeHtml(id)}</strong><span>banned</span>`;
+      const unban = document.createElement('button');
+      unban.className = 'btn btn-small btn-blue';
+      unban.textContent = 'UNBAN';
+      unban.onclick = () => adminAction('unban_user', { user_id: id });
+      row.append(meta, unban);
+      banList.appendChild(row);
+    }
+    if (!banList.children.length) {
+      const empty = document.createElement('div');
+      empty.className = 'dim-item admin-empty';
+      empty.textContent = 'none banned';
+      banList.appendChild(empty);
+    }
+  }
+}
+
+function banDiscordIdInput() {
+  const input = $('adminBanId');
+  const userId = input ? input.value.trim() : '';
+  if (userId) adminAction('ban_user', { user_id: userId });
+}
+
+function unbanDiscordIdInput() {
+  const input = $('adminBanId');
+  const userId = input ? input.value.trim() : '';
+  if (userId) adminAction('unban_user', { user_id: userId });
 }
 
 function setAdminSpeed() {

@@ -12,6 +12,7 @@ Reverse-engineered from the Android app (`com.lg.wltechfpvcar`). No encryption, 
 
 - **Live FPV video** — H.264 stream decoded to MJPEG in-browser (~25fps)
 - **Discord OAuth race lobby** — allowlisted Discord users can join the driver queue; admins can pause, emergency-stop, advance drivers, and tune limits
+- **Admin moderation** — live connected Discord account list with kick, ban, and unban controls; bans persist locally outside git
 - **Remote-safe controls** — stale command rejection, active-driver validation, max speed cap, and admin-only car connect/disconnect
 - **Motor control** — WASD keys + D-pad buttons at 20Hz (matches original app rate)
 - **Dual-axis combos** — steer while accelerating (W+A, W+D, S+A, S+D)
@@ -67,6 +68,7 @@ hostname -I | awk '{print $1}'
 | `ALLOWED_DISCORD_IDS` | unset | Comma-separated allowlist. Use `user_id` for drivers or `user_id:spectator` for spectator-only users |
 | `DEFAULT_DRIVE_SECONDS` | `120` | Default active-driver session length, clamped to 15–3600 seconds |
 | `MAX_REMOTE_SPEED_PERCENT` | `70` | Server-side speed cap for remote drivers, clamped to 5–100% |
+| `BANNED_DISCORD_IDS_FILE` | `.banned_discord_ids` | Local persistent banlist file. Keep it private and out of git. |
 
 ```bash
 # Example: custom car IP
