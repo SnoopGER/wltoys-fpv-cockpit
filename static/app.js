@@ -1355,6 +1355,76 @@ async function clearGuestCodes(mode) {
   } catch (e) {}
 }
 
+// ── Persistent Code Management ──────────────────────────
+async function refreshPersistentCodes() {
+  if (!isAdmin()) return;
+  try {
+    const resp = await fetch('/api/guest/codes', { credentials: 'include' });
+    const data = await resp.json();
+    if (data.ok) {
+      const list = $('persistentCodeList');
+      if (!list) return;
+      
+      const persistentCodes = data.codes.filter(c => c.persistent);
+      if (persistentCodes.length === 0) {
+        list.innerHTML = '<div class="dim-item">No persistent codes</div>';
+        return;
+      }
+      
+      list.innerHTML = persistentCodes.map(c => {
+        const status = c.active ? '🟢 Enabled' : '🔴 Disabled';
+        return `<div class="guest-code-row">
+          <span class="guest-code-text">${c.code}</span>
+          <span class="guest-code-status">${status}</span>
+          <button class="btn btn-small ${c.active ? 'btn-red' : 'btn-green'}" onclick="togglePersistentCode('${c.code}', ${!c.active})">${c.active ? 'DISABLE' : 'ENABLE'}</button>
+        </div>`;
+      }).join('');
+    }
+  } catch (e) {}
+}
+
+async function togglePersistentCode(code, enable) {
+  try {
+    const resp = await fetch('/api/guest/toggle-persistent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ code, enabled: enable }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      addLog('SYS', `${enable ? '🟢 Enabled' : '🔴 Disabled'} persistent code: ${code}`);
+      refreshPersistentCodes();
+    }
+  } catch (e) {}
+}
+
+async function addPersistentCode() {
+  const input = $('newPersistentCode');
+  if (!input) return;
+  
+  const code = input.value.trim().toUpperCase();
+  if (!code) {
+    addLog('ERR', 'Enter a code name');
+    return;
+  }
+  
+  try {
+    const resp = await fetch('/api/guest/add-persistent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ code }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      addLog('SYS', `✅ Persistent code ${data.restored ? 'restored' : 'created'}: ${code}`);
+      input.value = '';
+      refreshPersistentCodes();
+    }
+  } catch (e) {}
+}
+
 // ── Init ─────────────────────────────────────────────────
 initSliders();
 updateRoleUi();
@@ -1362,7 +1432,10 @@ initSocket();
 initGuestTimer();
 if (isLoggedIn()) {
   startPolling();
-  if (isAdmin()) refreshGuestCodes();
+  if (isAdmin()) {
+  refreshGuestCodes();
+  refreshPersistentCodes();
+}
 }
 addLog('SYS', '🏎️ FPV Debug Cockpit loaded.');
 addLog('SYS', 'Car: WL_FPV_CAR_99613492 @ 172.16.11.1');

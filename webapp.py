@@ -436,6 +436,7 @@ def get_active_codes():
                 "redeemed_by": entry["redeemed_by"],
                 "active": entry["active"],
                 "expired": now > entry["expires_at"],
+                "persistent": entry.get("persistent", False),
             })
     return sorted(result, key=lambda x: x["created"], reverse=True)
 
@@ -1003,13 +1004,17 @@ def api_guest_clear():
     removed = 0
     with guest_codes_lock:
         if mode == "all":
-            removed = len(guest_codes)
-            guest_codes.clear()
-        else:
-            to_remove = [c for c, e in guest_codes.items() if not e["active"] or time.time() > e["expires_at"]]
+            # Preserve persistent codes when clearing all
+            to_remove = [c for c, e in guest_codes.items() if not e.get("persistent")]
             for c in to_remove:
                 del guest_codes[c]
                 removed += 1
+        else:
+            to_remove = [c for c, e in guest_codes.items() if not e["active"] or time.time() > e["expires_at"] and not e.get("persistent")]
+            for c in to_remove:
+                del guest_codes[c]
+                removed += 1
+    _save_guest_codes()
     return jsonify({"ok": True, "removed": removed})
 
 
@@ -1070,6 +1075,70 @@ def api_guest_test():
         "known_codes_count": len(guest_codes),
         "known_codes": list(guest_codes.keys()),
     })
+
+
+@app.route("/api/guest/toggle-persistent", methods=["POST"])
+def api_guest_toggle_persistent():
+    """Admin: enable/disable a persistent code."""
+    user, error = require_admin()
+    if error:
+        return error
+    
+    data = request.get_json(silent=True) or {}
+    code = data.get("code", "").strip().upper()
+    enabled = data.get("enabled", True)
+    
+    if not code:
+        return jsonify({"ok": False, "error": "no_code"}), 400
+    
+    with guest_codes_lock:
+        if code not in guest_codes:
+            return jsonify({"ok": False, "error": "code_not_found"}), 404
+        
+        if not guest_codes[code].get("persistent"):
+            return jsonify({"ok": False, "error": "not_persistent"}), 400
+        
+        guest_codes[code]["active"] = enabled
+        guest_codes[code]["redeemed_by"] = None if enabled else "disabled"
+        _save_guest_codes()
+    
+    return jsonify({"ok": True, "code": code, "enabled": enabled})
+
+
+@app.route("/api/guest/add-persistent", methods=["POST"])
+def api_guest_add_persistent():
+    """Admin: add or restore a persistent code."""
+    user, error = require_admin()
+    if error:
+        return error
+    
+    data = request.get_json(silent=True) or {}
+    code = data.get("code", "").strip().upper()
+    
+    if not code:
+        return jsonify({"ok": False, "error": "no_code"}), 400
+    
+    with guest_codes_lock:
+        if code in guest_codes:
+            # Re-activate existing persistent code
+            if guest_codes[code].get("persistent"):
+                guest_codes[code]["active"] = True
+                guest_codes[code]["redeemed_by"] = None
+                _save_guest_codes()
+                return jsonify({"ok": True, "code": code, "restored": True})
+        
+        # Create new persistent code
+        guest_codes[code] = {
+            "created": time.time(),
+            "expires_at": time.time() + 365 * 24 * 3600,  # 1 year (effectively unlimited)
+            "duration": 0,  # No time limit for persistent codes
+            "redeemed_by": None,
+            "active": True,
+            "persistent": True,
+        }
+        _save_guest_codes()
+    
+    return jsonify({"ok": True, "code": code, "created": True})
 
 
 @app.route("/api/guest/remaining", methods=["GET"])

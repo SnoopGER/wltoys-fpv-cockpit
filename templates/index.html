@@ -169,6 +169,16 @@
         <button class="btn btn-small" onclick="clearGuestCodes('used')">CLEAR USED</button>
         <button class="btn btn-small btn-red" onclick="clearGuestCodes('all')">CLEAR ALL</button>
       </div>
+      
+      <!-- Persistent Codes Section -->
+      <div class="queue-title" style="margin-top:15px;">Persistent Codes</div>
+      <div id="persistentCodeList" class="guest-code-list">
+        <div class="dim-item">Loading...</div>
+      </div>
+      <div class="button-row" style="margin-top:8px;">
+        <input type="text" id="newPersistentCode" placeholder="CODE-NAME" class="guest-code-input" style="width:120px; text-transform:uppercase;">
+        <button class="btn btn-small btn-green" onclick="addPersistentCode()">+ ADD</button>
+      </div>
     </div>
     {% endif %}
 
