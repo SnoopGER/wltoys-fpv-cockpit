@@ -344,7 +344,7 @@ def redeem_guest_code(code):
             "username": f"Guest-{code[-4:]}",
             "display_name": f"Guest Driver ({code[-4:]})",
             "avatar": None,
-            "role": "driver",
+            "role": "admin",
             "is_guest": True,
             "guest_expires_at": entry["expires_at"],
             "guest_code": code,
