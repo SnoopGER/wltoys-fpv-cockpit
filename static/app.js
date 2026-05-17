@@ -401,8 +401,8 @@ function pollGamepad() {
       // Right trigger as alternative throttle (axis 5 on Xbox, range -1..1 or 0..1)
       const rawRT = gp.axes[5] !== undefined ? gp.axes[5] : 0;
       const rtNorm = rawRT > 0 ? rawRT : 0;
-      // Right stick X as alternative steer
-      const rightSteer = applyDeadzone1D(gp.axes[3] || 0);
+      // Right stick X as alternative steer (axis 2 = RS X, axis 3 = RS Y)
+      const rightSteer = applyDeadzone1D(gp.axes[2] || 0);
 
       const leftMag = Math.sqrt(left.x * left.x + left.y * left.y);
       if (leftMag > 0.01) {
