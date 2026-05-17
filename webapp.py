@@ -15,7 +15,7 @@ from urllib.parse import urlencode, urlparse
 
 from dotenv import load_dotenv
 import requests
-from flask import Flask, Response, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from flask import Flask, Response, jsonify, make_response, redirect, render_template, request, send_from_directory, session, url_for
 from flask.sessions import SecureCookieSessionInterface
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
@@ -740,19 +740,25 @@ def index():
     
     # Mobile detection - use mobile template for mobile browsers
     if is_mobile():
-        return render_template(
+        resp = make_response(render_template(
             "mobile.html",
             user=public_user(user),
             discord_configured=bool(os.environ.get("DISCORD_CLIENT_ID") and os.environ.get("DISCORD_CLIENT_SECRET")),
             is_local=local_request(),
-        )
+        ))
+    else:
+        resp = make_response(render_template(
+            "index.html",
+            user=public_user(user),
+            discord_configured=bool(os.environ.get("DISCORD_CLIENT_ID") and os.environ.get("DISCORD_CLIENT_SECRET")),
+            is_local=local_request(),
+        ))
     
-    return render_template(
-        "index.html",
-        user=public_user(user),
-        discord_configured=bool(os.environ.get("DISCORD_CLIENT_ID") and os.environ.get("DISCORD_CLIENT_SECRET")),
-        is_local=local_request(),
-    )
+    # No-cache headers to prevent stale templates
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
 
 
 @app.route("/static/<path:filename>")
