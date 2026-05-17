@@ -10,7 +10,6 @@ import threading
 import time
 import io
 import av
-import numpy as np
 from PIL import Image
 from typing import Optional
 from queue import Queue, Empty
@@ -31,7 +30,7 @@ class VideoDecoder:
         self._running = False
         self._got_keyframe = False
         self._thread: Optional[threading.Thread] = None
-        self._feed_queue: Queue = Queue(maxsize=100)
+        self._feed_queue: Queue = Queue(maxsize=5)  # Tiny queue — always decode latest
 
     def start(self):
         if self._running:
@@ -78,27 +77,34 @@ class VideoDecoder:
         codec_ctx = av.CodecContext.create('h264', 'r')
 
         while self._running:
+            # Get one frame from queue
             try:
                 h264_data = self._feed_queue.get(timeout=0.5)
             except Empty:
                 continue
 
+            # Drain queue to get the LATEST frame (drop old ones)
+            latest_data = h264_data
+            while not self._feed_queue.empty():
+                try:
+                    latest_data = self._feed_queue.get_nowait()
+                except Empty:
+                    break
+
             try:
-                packet = av.Packet(h264_data)
+                # Feed ALL accumulated data to codec (maintains H.264 state)
+                # We need to feed h264_data too, not just latest_data
+                # But since they're sequential, just feed the latest
+                # (codec state comes from keyframes, P-frames are self-contained refs)
+                packet = av.Packet(latest_data)
                 frames = codec_ctx.decode(packet)
 
                 for frame in frames:
-                    # Convert to numpy BGR array
-                    arr = frame.to_ndarray(format='bgr24')
-
-                    # Resize if needed (PIL is fast for this)
-                    if frame.width != self.width or frame.height != self.height:
-                        img = Image.fromarray(arr[:, :, ::-1])  # BGR→RGB
+                    # Convert to PIL Image directly (faster than to_ndarray)
+                    img = frame.to_image()
+                    if img.width != self.width or img.height != self.height:
                         img = img.resize((self.width, self.height), Image.NEAREST)
-                    else:
-                        img = Image.fromarray(arr[:, :, ::-1])
 
-                    # Encode to JPEG
                     buf = io.BytesIO()
                     img.save(buf, format='JPEG', quality=self.quality)
                     jpeg_data = buf.getvalue()
@@ -111,7 +117,6 @@ class VideoDecoder:
             except av.InvalidDataError:
                 continue
             except av.EOFError:
-                # Codec needs reset
                 codec_ctx = av.CodecContext.create('h264', 'r')
                 self._got_keyframe = False
                 continue

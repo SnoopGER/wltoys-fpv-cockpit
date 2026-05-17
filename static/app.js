@@ -430,11 +430,14 @@ function pollGamepad() {
       // Right stick X as alternative steer (axis 2 = RS X, axis 3 = RS Y)
       const rightSteer = applyDeadzone1D(gp.axes[2] || 0);
       // Triggers: axis 4 = LT (brake), axis 5 = RT (accelerate)
-      // Range: -1 (released) to +1 (pressed) on most browsers
-      const rawRT = gp.axes[5] !== undefined ? (gp.axes[5] + 1) / 2 : 0;  // Normalize to 0..1
-      const rawLT = gp.axes[4] !== undefined ? (gp.axes[4] + 1) / 2 : 0;  // Normalize to 0..1
-      const rtAccel = rawRT > 0.05 ? rawRT : 0;  // RT = accelerate
-      const ltBrake = rawLT > 0.05 ? rawLT : 0;  // LT = brake/reverse
+      // Range varies by browser: -1(released)..1(pressed) OR 0..1
+      // Handle both: use raw value if > 0.05 (covers 0..1 range),
+      // or normalize if rest position is near -1 (covers -1..1 range)
+      const rtRaw = gp.axes[5] !== undefined ? gp.axes[5] : -1;
+      const ltRaw = gp.axes[4] !== undefined ? gp.axes[4] : -1;
+      // Normalize: if rest is near -1, map -1..1 → 0..1. If rest is near 0, use directly.
+      const rtAccel = rtRaw < -0.5 ? Math.max(0, (rtRaw + 1) / 2) : Math.max(0, rtRaw);
+      const ltBrake = ltRaw < -0.5 ? Math.max(0, (ltRaw + 1) / 2) : Math.max(0, ltRaw);
 
       const leftMag = Math.sqrt(left.x * left.x + left.y * left.y);
       const rightMag = Math.abs(rightSteer);
