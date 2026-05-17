@@ -2,6 +2,8 @@
 
 **Control your WLtoys 6405 FPV RC car from a web browser — live video stream + keyboard/gamepad motor control.**
 
+![FPV Cockpit Dashboard](docs/cockpit-screenshot.png)
+
 Reverse-engineered from the Android app (`com.lg.wltechfpvcar`). No encryption, no cloud, pure local UDP.
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue) ![License](https://img.shields.io/badge/license-MIT-green) ![Status](https://img.shields.io/badge/status-working-brightgreen)
