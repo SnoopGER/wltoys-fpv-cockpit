@@ -200,41 +200,112 @@ async function sendRaw() {
 let gamepadActive = false;
 let gamepadPoller = null;
 let gpBtnPrev = {};  // Previous button states for edge detection
+let selectedGamepadId = 'auto';  // 'auto' or gamepad.id string
+let gpProfileCache = {};  // Cache detected profiles by gamepad.id
 
 const DEADZONE = 0.15;
 
-// ── Gamepad UI Helpers ───────────────────────────────────
-function setGamepadUI(connected, name) {
+// ── Controller Profiles ──────────────────────────────────
+// Auto-detect profile from gamepad.id string
+function detectProfile(gp) {
+  const id = (gp.id || '').toLowerCase();
+  if (id.includes('mboster') || id.includes('mboo'))
+    return 'moza-pedals';
+  if ((id.includes('r9') || id.includes('moza') || id.includes('mozar')) && !id.includes('pedal'))
+    return 'moza-wheel';
+  if (id.includes('xbox') || id.includes('microsoft') || id.includes('xinput'))
+    return 'xbox';
+  if (id.includes('dualshock') || id.includes('dualsense') || id.includes('sony') || id.includes('playstation'))
+    return 'playstation';
+  if (id.includes('logitech') || id.includes('g29') || id.includes('g920') || id.includes('g923'))
+    return 'moza-wheel';  // Logitech wheels behave like Moza wheel
+  return 'generic';
+}
+
+// Get short label for profile
+function profileLabel(profile) {
+  const labels = {
+    'xbox': '🎮 Xbox',
+    'playstation': '🎮 PlayStation',
+    'moza-pedals': '🦶 Moza Pedals',
+    'moza-wheel': '🎡 Moza Wheel',
+    'generic': '🎮 Gamepad',
+  };
+  return labels[profile] || '🎮 Gamepad';
+}
+
+// ── Gamepad Selector ─────────────────────────────────────
+function refreshGamepadList() {
+  const select = $('gamepadSelect');
+  if (!select) return;
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  const current = select.value;
+
+  // Preserve selection, rebuild options
+  select.innerHTML = '<option value="auto">🎮 Auto-detect</option>';
+
+  let anyConnected = false;
+  for (let i = 0; i < pads.length; i++) {
+    const gp = pads[i];
+    if (!gp) continue;
+    anyConnected = true;
+    const profile = gpProfileCache[gp.id] || detectProfile(gp);
+    gpProfileCache[gp.id] = profile;
+    const label = profileLabel(profile) + ' ' + (gp.index + 1);
+    const opt = document.createElement('option');
+    opt.value = gp.id;
+    opt.textContent = label;
+    opt.title = gp.id;
+    select.appendChild(opt);
+  }
+
+  // Restore previous selection
+  if (current && Array.from(select.options).some(o => o.value === current)) {
+    select.value = current;
+  }
+
+  // Update dot color
   const dot = $('gamepadDot');
-  const txt = $('gamepadText');
-  if (connected) {
+  if (anyConnected) {
     dot.classList.add('connected');
-    txt.textContent = '🎮 ' + (name || 'Xbox Controller');
   } else {
     dot.classList.remove('connected');
-    txt.textContent = '🎮 No Gamepad';
   }
+}
+
+function onGamepadSelectChange() {
+  const select = $('gamepadSelect');
+  selectedGamepadId = select.value;
+  addLog('SYS', '🎮 Controller: ' + (selectedGamepadId === 'auto' ? 'Auto-detect' : selectedGamepadId.substring(0, 40)));
+}
+
+function getSelectedGamepad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  if (selectedGamepadId === 'auto') {
+    return Array.from(pads).find(p => p !== null) || null;
+  }
+  return Array.from(pads).find(p => p && p.id === selectedGamepadId) || null;
 }
 
 // ── Gamepad Connect/Disconnect Events ───────────────────
 window.addEventListener('gamepadconnected', (e) => {
-  addLog('SYS', '🎮 Gamepad connected: ' + e.gamepad.id);
-  setGamepadUI(true, e.gamepad.id.substring(0, 30));
+  const profile = detectProfile(e.gamepad);
+  gpProfileCache[e.gamepad.id] = profile;
+  addLog('SYS', '🎮 Connected: ' + profileLabel(profile) + ' — ' + e.gamepad.id.substring(0, 50));
+  refreshGamepadList();
   if (!gamepadPoller) {
     gamepadPoller = setInterval(pollGamepad, 50);
   }
 });
 
 window.addEventListener('gamepaddisconnected', (e) => {
-  addLog('SYS', '🎮 Gamepad disconnected: ' + e.gamepad.id);
-  setGamepadUI(false);
-  // If no gamepads remain, stop polling
+  addLog('SYS', '🎮 Disconnected: ' + (e.gamepad.id || '').substring(0, 50));
+  refreshGamepadList();
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   const anyConnected = Array.from(pads).some(p => p !== null);
   if (!anyConnected) {
     if (gamepadPoller) { clearInterval(gamepadPoller); gamepadPoller = null; }
     gamepadActive = false;
-    // Resume keyboard control if keys are held
     if (activeKeys.size > 0) updateMotorFromKeys();
   }
 });
@@ -243,104 +314,163 @@ window.addEventListener('gamepaddisconnected', (e) => {
 function applyDeadzone(x, y) {
   const mag = Math.sqrt(x * x + y * y);
   if (mag < DEADZONE) return { x: 0, y: 0 };
-  // Rescale so values just outside deadzone start from 0
   const scale = (mag - DEADZONE) / (1 - DEADZONE);
   const nx = (x / mag) * scale;
   const ny = (y / mag) * scale;
   return { x: Math.max(-1, Math.min(1, nx)), y: Math.max(-1, Math.min(1, ny)) };
 }
 
+function applyDeadzone1D(val) {
+  if (Math.abs(val) < DEADZONE) return 0;
+  const sign = val > 0 ? 1 : -1;
+  return sign * (Math.abs(val) - DEADZONE) / (1 - DEADZONE);
+}
+
 // ── Gamepad Polling Loop (20Hz, 50ms) ────────────────────
 function pollGamepad() {
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  const gp = Array.from(pads).find(p => p !== null);
-  if (!gp) return;
-
-  // ── Axes ──
-  const rawLX = gp.axes[0] || 0;  // Left stick X
-  const rawLY = gp.axes[1] || 0;  // Left stick Y (up = -1)
-  const rawRX = gp.axes[3] || 0;  // Right stick X (alt steering)
-  // Right trigger: axis 5 (range 0..1 on Xbox, or -1..1)
-  // Also check button 7 (RT) as fallback
-  const rawRT = gp.axes[5] !== undefined ? gp.axes[5] : 0;
-
-  // ── Primary stick (left) with circular deadzone ──
-  const left = applyDeadzone(rawLX, rawLY);
-  // ── Alternative: right stick X + right trigger ──
-  const rtNorm = rawRT > 0 ? rawRT : 0;  // Trigger 0..1
-  const rightSteerDead = applyDeadzone(rawRX, 0);
-
-  // Determine which input source has more magnitude (last-input-wins by magnitude)
-  const leftMag = Math.sqrt(left.x * left.x + left.y * left.y);
-  const altThrottle = rtNorm;  // Right trigger as throttle
-  const altSteer = Math.abs(rightSteerDead.x);
-
-  // Use whichever has more deflection for throttle
-  let throttleVal = 0;   // negative = forward, positive = reverse
-  let steerVal = 0;       // negative = left, positive = right
-
-  if (leftMag > 0.01) {
-    // Left stick is active — use it for both throttle and steer
-    throttleVal = left.y;  // Y: -1 = forward, +1 = reverse (inverted)
-    steerVal = left.x;     // X: -1 = left, +1 = right
-    gamepadActive = true;
-  } else if (altThrottle > 0.01 || altSteer > 0.01) {
-    // Alternative controls are active
-    throttleVal = altThrottle;  // RT: 0..1 means throttle forward
-    steerVal = rightSteerDead.x;
-    gamepadActive = true;
-  } else {
-    // Stick is in deadzone — if we were active, stop
-    if (gamepadActive) {
-      gamepadActive = false;
-      // Clear any active keyboard command tracking and stop
-      activeKeys.clear();
-      stopMotor();
-      // Restore sliders to manual defaults
-      restoreSliders();
-    }
-    handleGamepadButtons(gp);
+  const gp = getSelectedGamepad();
+  if (!gp) {
+    // Check if any gamepads exist but selected one is gone — refresh list
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    if (Array.from(pads).some(p => p !== null)) refreshGamepadList();
     return;
   }
 
-  gamepadActive = true;
+  const profile = gpProfileCache[gp.id] || detectProfile(gp);
+  gpProfileCache[gp.id] = profile;
 
-  // ── Compute motor speed/steer from analog deflection ──
-  // Speed = proportional to stick deflection (5% min, 100% max)
-  const speedPct = Math.max(5, Math.round(Math.abs(throttleVal) * 100));
-  const steerPct = Math.max(5, Math.round(Math.abs(steerVal) * 100));
+  let throttleVal = 0;  // -1 = forward, +1 = reverse
+  let steerVal = 0;     // -1 = left, +1 = right
+  let hasInput = false;
 
-  // Update sliders visually
-  const speedSlider = $('speedSlider');
-  const speedValue = $('speedValue');
-  const steerSlider = $('steerSlider');
-  const steerValue = $('steerValue');
-  if (speedSlider) { speedSlider.value = speedPct; speedValue.textContent = speedPct + '%'; motorSpeed = speedPct; }
-  if (steerSlider) { steerSlider.value = steerPct; steerValue.textContent = steerPct + '%'; motorSteerRange = steerPct; }
+  // ── Profile-specific axis mapping ──
+  switch (profile) {
+    case 'xbox':
+    case 'playstation': {
+      // Left stick: Y=throttle, X=steer
+      const left = applyDeadzone(gp.axes[0] || 0, gp.axes[1] || 0);
+      // Right trigger as alternative throttle (axis 5 on Xbox, range -1..1 or 0..1)
+      const rawRT = gp.axes[5] !== undefined ? gp.axes[5] : 0;
+      const rtNorm = rawRT > 0 ? rawRT : 0;
+      // Right stick X as alternative steer
+      const rightSteer = applyDeadzone1D(gp.axes[3] || 0);
 
-  // ── Determine direction ──
-  const isForward = throttleVal < -DEADZONE;
-  const isReverse = throttleVal > DEADZONE;
-  const isLeft = steerVal < -DEADZONE;
-  const isRight = steerVal > DEADZONE;
+      const leftMag = Math.sqrt(left.x * left.x + left.y * left.y);
+      if (leftMag > 0.01) {
+        throttleVal = left.y;   // Y: -1=up/forward, +1=down/reverse
+        steerVal = left.x;
+        hasInput = true;
+      } else if (rtNorm > 0.01 || Math.abs(rightSteer) > 0.01) {
+        throttleVal = -rtNorm;  // RT: positive = forward
+        steerVal = rightSteer;
+        hasInput = true;
+      }
+      break;
+    }
 
-  let command = null;
-  if (isForward && isLeft) command = 'forward_left';
-  else if (isForward && isRight) command = 'forward_right';
-  else if (isReverse && isLeft) command = 'reverse_left';
-  else if (isReverse && isRight) command = 'reverse_right';
-  else if (isForward) command = 'forward';
-  else if (isReverse) command = 'reverse';
-  else if (isLeft) command = 'left';
-  else if (isRight) command = 'right';
+    case 'moza-pedals': {
+      // MBoster pedals: axis 0 = throttle, axis 1 = brake
+      // Pedals at rest = -1 (released), full press = +1
+      // Some pedals: rest=1, full=-1 — we handle both
+      let throttleRaw = gp.axes[0] || 0;  // Throttle pedal
+      let brakeRaw = gp.axes[1] || 0;      // Brake pedal
 
-  if (command) {
-    startMotor(command);
-  } else {
-    stopMotor();
+      // Detect range: if rest position is near -1, use 0..1 mapping
+      // If rest position is near +1, invert
+      // We normalize to 0 = released, 1 = fully pressed
+      const throttlePress = (throttleRaw + 1) / 2;  // -1..1 → 0..1
+      const brakePress = (brakeRaw + 1) / 2;
+
+      // Apply deadzone to pedal press
+      const throttle = throttlePress > DEADZONE ? throttlePress : 0;
+      const brake = brakePress > DEADZONE ? brakePress : 0;
+
+      if (throttle > 0.01) {
+        throttleVal = -throttle;  // Negative = forward
+        hasInput = true;
+      }
+      if (brake > 0.01) {
+        throttleVal = brake;  // Positive = reverse
+        hasInput = true;
+      }
+      // No steering from pedals alone
+      steerVal = 0;
+      break;
+    }
+
+    case 'moza-wheel': {
+      // R9 wheelbase: axis 0 = steering rotation (-1 = full left, 0 = center, 1 = full right)
+      const wheelRaw = gp.axes[0] || 0;
+      steerVal = applyDeadzone1D(wheelRaw);
+      // No throttle from wheel alone
+      throttleVal = 0;
+      hasInput = Math.abs(steerVal) > 0.01;
+      // Also check if there are button-based throttle/brake (paddle shifters etc.)
+      // Buttons: typically 0=shift up, 1=shift down on wheels
+      break;
+    }
+
+    default: {
+      // Generic: assume axis 0=steer, axis 1=throttle (common HID layout)
+      const left = applyDeadzone(gp.axes[0] || 0, gp.axes[1] || 0);
+      const leftMag = Math.sqrt(left.x * left.x + left.y * left.y);
+      if (leftMag > 0.01) {
+        throttleVal = left.y;
+        steerVal = left.x;
+        hasInput = true;
+      }
+      break;
+    }
   }
 
-  // ── Handle buttons ──
+  // ── Apply input or stop ──
+  if (hasInput && (Math.abs(throttleVal) > 0.01 || Math.abs(steerVal) > 0.01)) {
+    gamepadActive = true;
+
+    // Compute proportional speed/steer from deflection
+    const speedPct = Math.max(5, Math.round(Math.abs(throttleVal) * 100));
+    const steerPct = Math.max(5, Math.round(Math.abs(steerVal) * 100));
+
+    // Update sliders visually
+    const speedSlider = $('speedSlider');
+    const speedValue = $('speedValue');
+    const steerSlider = $('steerSlider');
+    const steerValue = $('steerValue');
+    if (speedSlider) { speedSlider.value = speedPct; speedValue.textContent = speedPct + '%'; motorSpeed = speedPct; }
+    if (steerSlider) { steerSlider.value = steerPct; steerValue.textContent = steerPct + '%'; motorSteerRange = steerPct; }
+
+    // Determine direction
+    const isForward = throttleVal < -DEADZONE;
+    const isReverse = throttleVal > DEADZONE;
+    const isLeft = steerVal < -DEADZONE;
+    const isRight = steerVal > DEADZONE;
+
+    let command = null;
+    if (isForward && isLeft) command = 'forward_left';
+    else if (isForward && isRight) command = 'forward_right';
+    else if (isReverse && isLeft) command = 'reverse_left';
+    else if (isReverse && isRight) command = 'reverse_right';
+    else if (isForward) command = 'forward';
+    else if (isReverse) command = 'reverse';
+    else if (isLeft) command = 'left';
+    else if (isRight) command = 'right';
+
+    if (command) {
+      startMotor(command);
+    } else {
+      stopMotor();
+    }
+  } else {
+    // Stick in deadzone
+    if (gamepadActive) {
+      gamepadActive = false;
+      activeKeys.clear();
+      stopMotor();
+      restoreSliders();
+    }
+  }
+
+  // ── Handle buttons (same for all profiles) ──
   handleGamepadButtons(gp);
 }
 

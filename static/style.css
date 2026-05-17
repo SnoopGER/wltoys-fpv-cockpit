@@ -528,6 +528,29 @@ main {
   animation: pulse 1.5s infinite;
 }
 
+.gamepad-select {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  max-width: 200px;
+}
+.gamepad-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.gamepad-select option {
+  background: var(--bg2);
+  color: var(--text);
+}
+
 /* ── Scrollbar ─────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
