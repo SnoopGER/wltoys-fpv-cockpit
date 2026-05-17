@@ -1279,6 +1279,24 @@ async function revokeCode(code) {
   } catch (e) {}
 }
 
+// Admin: Clear used/expired codes
+async function clearGuestCodes(mode) {
+  if (mode === 'all' && !confirm('Clear ALL codes? Active codes will stop working.')) return;
+  try {
+    const resp = await fetch('/api/guest/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ mode }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      addLog('SYS', `🗑️ Cleared ${data.removed} codes`);
+      refreshGuestCodes();
+    }
+  } catch (e) {}
+}
+
 // ── Init ─────────────────────────────────────────────────
 initSliders();
 updateRoleUi();

@@ -409,12 +409,18 @@ def public_user(user):
     if not user:
         return None
     user_id = user["id"]
+    # Guest users have role stored directly in their dict
+    if user.get("is_guest"):
+        role = user.get("role", "driver")
+    else:
+        role = role_for_user(user_id)
     return {
         "id": user_id,
         "username": user.get("username", "unknown"),
         "display_name": user.get("display_name") or user.get("username", "unknown"),
         "avatar": user.get("avatar"),
-        "role": role_for_user(user_id),
+        "role": role,
+        "is_guest": user.get("is_guest", False),
         "connections": len(lobby.get("user_sids", {}).get(user_id, set())),
         "banned": is_banned_user(user_id),
         "active": lobby.get("active_driver") == user_id,
@@ -864,6 +870,27 @@ def api_guest_revoke():
             guest_codes[code]["active"] = False
             return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "code_not_found"}), 404
+
+
+@app.route("/api/guest/clear", methods=["POST"])
+def api_guest_clear():
+    """Admin: clear used/expired codes."""
+    user, error = require_admin()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    mode = data.get("mode", "used")  # "used" or "all"
+    removed = 0
+    with guest_codes_lock:
+        if mode == "all":
+            removed = len(guest_codes)
+            guest_codes.clear()
+        else:
+            to_remove = [c for c, e in guest_codes.items() if not e["active"] or time.time() > e["expires_at"]]
+            for c in to_remove:
+                del guest_codes[c]
+                removed += 1
+    return jsonify({"ok": True, "removed": removed})
 
 
 @app.route("/api/redeem-code", methods=["POST"])
