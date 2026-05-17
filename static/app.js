@@ -245,18 +245,32 @@ function refreshGamepadList() {
   select.innerHTML = '<option value="auto">🎮 Auto-detect</option>';
 
   let anyConnected = false;
+  let hasPedals = false;
+  let hasWheel = false;
+
   for (let i = 0; i < pads.length; i++) {
     const gp = pads[i];
     if (!gp) continue;
     anyConnected = true;
     const profile = gpProfileCache[gp.id] || detectProfile(gp);
     gpProfileCache[gp.id] = profile;
+    if (profile === 'moza-pedals') hasPedals = true;
+    if (profile === 'moza-wheel') hasWheel = true;
     const label = profileLabel(profile) + ' ' + (gp.index + 1);
     const opt = document.createElement('option');
     opt.value = gp.id;
     opt.textContent = label;
     opt.title = gp.id;
     select.appendChild(opt);
+  }
+
+  // Add combined option if both pedals and wheel are present
+  if (hasPedals && hasWheel) {
+    const opt = document.createElement('option');
+    opt.value = 'combined-moza';
+    opt.textContent = '🦶🎡 Pedals + Wheel';
+    opt.title = 'Moza pedals (throttle/brake) + R9 wheelbase (steering)';
+    select.insertBefore(opt, select.children[1]);  // Right after Auto-detect
   }
 
   // Restore previous selection
@@ -282,7 +296,17 @@ function onGamepadSelectChange() {
 function getSelectedGamepad() {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   if (selectedGamepadId === 'auto') {
+    // Smart auto: if both Moza pedals + wheel exist, combine them
+    const pedals = Array.from(pads).find(p => p && detectProfile(p) === 'moza-pedals');
+    const wheel = Array.from(pads).find(p => p && detectProfile(p) === 'moza-wheel');
+    if (pedals && wheel) return { _combined: true, pedals, wheel };
     return Array.from(pads).find(p => p !== null) || null;
+  }
+  if (selectedGamepadId === 'combined-moza') {
+    const pedals = Array.from(pads).find(p => p && detectProfile(p) === 'moza-pedals');
+    const wheel = Array.from(pads).find(p => p && detectProfile(p) === 'moza-wheel');
+    if (!pedals && !wheel) return null;
+    return { _combined: true, pedals, wheel };
   }
   return Array.from(pads).find(p => p && p.id === selectedGamepadId) || null;
 }
@@ -336,16 +360,41 @@ function pollGamepad() {
     return;
   }
 
-  const profile = gpProfileCache[gp.id] || detectProfile(gp);
-  gpProfileCache[gp.id] = profile;
+  const profile = gp._combined ? null : (gpProfileCache[gp.id] || detectProfile(gp));
 
   let throttleVal = 0;  // -1 = forward, +1 = reverse
   let steerVal = 0;     // -1 = left, +1 = right
   let hasInput = false;
 
-  // ── Profile-specific axis mapping ──
-  switch (profile) {
-    case 'xbox':
+  // ── Combined mode: pedals + wheel simultaneously ──
+  if (gp._combined) {
+    // Pedals for throttle/brake
+    if (gp.pedals) {
+      let throttleRaw = gp.pedals.axes[0] || 0;
+      let brakeRaw = gp.pedals.axes[1] || 0;
+      const throttlePress = (throttleRaw + 1) / 2;
+      const brakePress = (brakeRaw + 1) / 2;
+      const throttle = throttlePress > DEADZONE ? throttlePress : 0;
+      const brake = brakePress > DEADZONE ? brakePress : 0;
+      if (throttle > 0.01) { throttleVal = -throttle; hasInput = true; }
+      if (brake > 0.01) { throttleVal = brake; hasInput = true; }
+    }
+    // Wheel for steering
+    if (gp.wheel) {
+      const wheelRaw = gp.wheel.axes[0] || 0;
+      steerVal = applyDeadzone1D(wheelRaw);
+      if (Math.abs(steerVal) > 0.01) hasInput = true;
+    }
+    // Handle buttons from both devices
+    if (gp.pedals) handleGamepadButtons(gp.pedals);
+    if (gp.wheel) handleGamepadButtons(gp.wheel);
+  } else {
+    // ── Single device: profile-specific axis mapping ──
+    const profile = gpProfileCache[gp.id] || detectProfile(gp);
+    gpProfileCache[gp.id] = profile;
+
+    switch (profile) {
+      case 'xbox':
     case 'playstation': {
       // Left stick: Y=throttle, X=steer
       const left = applyDeadzone(gp.axes[0] || 0, gp.axes[1] || 0);
@@ -468,14 +517,58 @@ function pollGamepad() {
       stopMotor();
       restoreSliders();
     }
+    }  // end switch
+  }  // end else (single device)
+
+  // ── Apply input or stop ──
+  if (hasInput && (Math.abs(throttleVal) > 0.01 || Math.abs(steerVal) > 0.01)) {
+    gamepadActive = true;
+
+    const speedPct = Math.max(5, Math.round(Math.abs(throttleVal) * 100));
+    const steerPct = Math.max(5, Math.round(Math.abs(steerVal) * 100));
+
+    const speedSlider = $('speedSlider');
+    const speedValue = $('speedValue');
+    const steerSlider = $('steerSlider');
+    const steerValue = $('steerValue');
+    if (speedSlider) { speedSlider.value = speedPct; speedValue.textContent = speedPct + '%'; motorSpeed = speedPct; }
+    if (steerSlider) { steerSlider.value = steerPct; steerValue.textContent = steerPct + '%'; motorSteerRange = steerPct; }
+
+    const isForward = throttleVal < -DEADZONE;
+    const isReverse = throttleVal > DEADZONE;
+    const isLeft = steerVal < -DEADZONE;
+    const isRight = steerVal > DEADZONE;
+
+    let command = null;
+    if (isForward && isLeft) command = 'forward_left';
+    else if (isForward && isRight) command = 'forward_right';
+    else if (isReverse && isLeft) command = 'reverse_left';
+    else if (isReverse && isRight) command = 'reverse_right';
+    else if (isForward) command = 'forward';
+    else if (isReverse) command = 'reverse';
+    else if (isLeft) command = 'left';
+    else if (isRight) command = 'right';
+
+    if (command) {
+      startMotor(command);
+    } else {
+      stopMotor();
+    }
+  } else {
+    // Stick in deadzone
+    if (gamepadActive) {
+      gamepadActive = false;
+      activeKeys.clear();
+      stopMotor();
+      restoreSliders();
+    }
   }
 
-  // ── Handle buttons (same for all profiles) ──
-  handleGamepadButtons(gp);
+  // Handle buttons (single device only — combined handles above)
+  if (!gp._combined) handleGamepadButtons(gp);
 }
 
 function restoreSliders() {
-  // Restore speed slider to 100, steer to 100 when gamepad releases
   const speedSlider = $('speedSlider');
   const speedValue = $('speedValue');
   const steerSlider = $('steerSlider');
