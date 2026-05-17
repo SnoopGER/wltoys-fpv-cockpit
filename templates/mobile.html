@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>🏎️ FPV Mobile</title>
+  <link rel="stylesheet" href="/static/mobile.css">
+</head>
+<body data-user-role="{{ user.role if user else '' }}" data-user-id="{{ user.id if user else '' }}" data-can-connect="{{ 'true' if user and user.can_connect else 'false' }}">
+
+  {% if not user %}
+  <!-- Login / Code Entry Screen -->
+  <div class="login-screen" id="loginScreen">
+    <div class="login-box">
+      <h1>🏎️ FPV Racing</h1>
+      
+      {% if discord_configured %}
+      <a href="/login" class="btn btn-discord">Login with Discord</a>
+      <div class="divider">or</div>
+      {% endif %}
+      
+      <div class="code-input-group">
+        <input type="text" id="guestCodeInput" placeholder="Enter drive code" maxlength="20" autocomplete="off">
+        <button class="btn btn-green" onclick="redeemCode()">GO</button>
+      </div>
+      <div id="loginError" class="error-msg"></div>
+    </div>
+  </div>
+  {% else %}
+  <!-- Mobile Dashboard -->
+  <div class="mobile-dashboard">
+    <!-- Header -->
+    <div class="mobile-header">
+      <span class="user-info">{{ user.display_name }}</span>
+      <span class="role-badge">{{ user.role }}</span>
+      <a href="/logout" class="btn-logout">Logout</a>
+    </div>
+
+    <!-- Video Feed -->
+    <div class="video-container" id="videoContainer">
+      <img id="videoFeed" src="" alt="No video feed">
+      <div class="video-overlay" id="videoOverlay">
+        <div class="overlay-text">NO SIGNAL</div>
+      </div>
+    </div>
+
+    <!-- Connection Buttons -->
+    <div class="connection-bar">
+      <button class="btn btn-connect connect-allowed" id="btnConnect" onclick="doConnect()">▶ CONNECT</button>
+      <button class="btn btn-disconnect connect-allowed" id="btnDisconnect" onclick="doDisconnect()" disabled>■ DISCONNECT</button>
+    </div>
+
+    <!-- Touch Controls -->
+    <div class="touch-controls" id="touchControls">
+      <!-- Left: Steering -->
+      <div class="steering-pad">
+        <button class="touch-btn steer-left" id="btnSteerLeft">◀</button>
+        <button class="touch-btn steer-right" id="btnSteerRight">▶</button>
+      </div>
+
+      <!-- Right: Throttle/Brake -->
+      <div class="throttle-pad">
+        <button class="touch-btn throttle-up" id="btnThrottle">▲</button>
+        <button class="touch-btn brake-down" id="btnBrake">▼</button>
+      </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+      <span id="speedDisplay">Speed: --%</span>
+      <span id="connectionStatus">Disconnected</span>
+    </div>
+  </div>
+  {% endif %}
+
+  <script src="/static/socket.io.min.js"></script>
+  <script src="/static/mobile.js"></script>
+</body>
+</html>

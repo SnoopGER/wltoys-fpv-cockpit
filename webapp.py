@@ -724,9 +724,29 @@ def local_request():
 
 # HTML/Auth Routes
 
+def is_mobile():
+    """Detect mobile browsers from User-Agent."""
+    ua = request.headers.get("User-Agent", "").lower()
+    mobile_keywords = [
+        "iphone", "ipod", "android", "blackberry", "windows phone",
+        "opera mini", "mobile", "tablet", "ipad"
+    ]
+    return any(kw in ua for kw in mobile_keywords)
+
+
 @app.route("/")
 def index():
     user = current_user()
+    
+    # Mobile detection - use mobile template for mobile browsers
+    if is_mobile():
+        return render_template(
+            "mobile.html",
+            user=public_user(user),
+            discord_configured=bool(os.environ.get("DISCORD_CLIENT_ID") and os.environ.get("DISCORD_CLIENT_SECRET")),
+            is_local=local_request(),
+        )
+    
     return render_template(
         "index.html",
         user=public_user(user),
