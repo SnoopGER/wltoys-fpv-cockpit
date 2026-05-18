@@ -112,22 +112,30 @@ FPV_CAR_IP=172.16.11.1 bash start.sh
 
 For a Cloudflare Quick Tunnel, point the tunnel service at the Flask app on `http://<kali-lan-ip>:5555` and configure Discord with the public HTTPS callback URL. For LAN driving, also add the LAN callback URL in Discord and in `DISCORD_REDIRECT_URIS`; starting login from the LAN host will then return to the LAN host instead of the Cloudflare route.
 
-### Docker (Windows / Mac / Linux)
+### Docker deployment (Linux track server)
+
+This V2 dashboard needs Linux host networking so the RC car's UDP video/control packets use the host network stack directly. Docker Desktop bridge/NAT is not supported for the hardware path.
 
 ```bash
-# Clone and connect to car WiFi first, then:
-cd wltoys-fpv-cockpit
+# On the track server:
+git clone --branch codex-discord-race-lobby https://github.com/SnoopGER/wltoys-fpv-cockpit.git fpv-dashboard-v2
+cd fpv-dashboard-v2
 
-# Linux (requires host networking for UDP)
-docker compose up --build
+# Create .env.local with the Discord OAuth/session settings from the setup section above.
+# Never commit this file.
+chmod 600 .env.local
+mkdir -p data
 
-# Windows Docker Desktop (host networking not supported)
-docker compose -f docker-compose.windows.yml up --build
+docker compose up -d --build
 ```
 
-Open **http://localhost:5555** in your browser.
+Open **http://localhost:5555** or your tunnel URL in your browser.
 
-> **⚠️ Windows note:** `network_mode: host` does not work on Docker Desktop for Windows. Use the `docker-compose.windows.yml` variant which maps ports explicitly. Make sure your PC is connected to the car's WiFi before starting the container.
+Runtime state is stored in `./data/`:
+- `guest_codes.json` — persisted one-time drive codes.
+- `banned_discord_ids` — local ban list.
+
+> **⚠️ UDP note:** Do not run the old Python process and this container at the same time. Only one dashboard instance should talk to the car UDP ports.
 
 ---
 
@@ -271,8 +279,7 @@ wltoys-fpv-cockpit/
 ├── .gitignore
 ├── .dockerignore
 ├── Dockerfile                  ← Docker image definition
-├── docker-compose.yml          ← Linux (host networking)
-├── docker-compose.windows.yml  ← Windows Docker Desktop
+├── docker-compose.yml          ← Linux host-network deployment
 ├── requirements.txt            ← Python dependencies
 ├── start.sh                    ← Launcher script
 ├── start-fpv-debug.sh          ← LAN launcher script

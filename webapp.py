@@ -71,7 +71,10 @@ state_lock = threading.RLock()
 timer_started = False
 
 # Guest Drive Codes: {code: {"created": time, "expires_at": time, "duration": int, "redeemed_by": str|None, "active": bool}}
-GUEST_CODES_FILE = Path(__file__).parent / ".guest_codes.json"
+GUEST_CODES_FILE = Path(os.environ.get(
+    "GUEST_CODES_FILE",
+    Path(__file__).parent / ".guest_codes.json",
+))
 guest_codes = {}
 guest_codes_lock = threading.Lock()
 
@@ -79,6 +82,7 @@ guest_codes_lock = threading.Lock()
 def _save_guest_codes():
     """Save non-persistent codes to disk. Caller MUST hold guest_codes_lock."""
     try:
+        GUEST_CODES_FILE.parent.mkdir(parents=True, exist_ok=True)
         data = {k: v for k, v in guest_codes.items() if not v.get("persistent")}
         with open(GUEST_CODES_FILE, "w") as f:
             json.dump(data, f)

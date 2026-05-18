@@ -1,10 +1,25 @@
 services:
-  fpv-cockpit:
-    build: .
-    image: wltoys-fpv-cockpit:latest
-    container_name: fpv-cockpit
-    network_mode: host          # Required on Linux — car sends UDP directly to host IP
+  fpv-dashboard-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fpv-dashboard-v2:latest
+    container_name: fpv-dashboard-v2
+
+    # Required on Linux for the RC car's UDP video/control path.
+    # Docker bridge/NAT breaks the car's return packets.
+    network_mode: host
+
+    env_file:
+      - .env.local
+
     environment:
-      - FPV_CAR_IP=172.16.11.1
-      - FPV_LISTEN_PORT=1234
+      GUEST_CODES_FILE: /app/data/guest_codes.json
+      BANNED_DISCORD_IDS_FILE: /app/data/banned_discord_ids
+      PYTHONUNBUFFERED: "1"
+
+    volumes:
+      - ./data:/app/data
+
     restart: unless-stopped
+    stop_grace_period: 10s

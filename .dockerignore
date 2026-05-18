@@ -1,7 +1,32 @@
-__pycache__
-*.pyc
-.git
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+.git/
 .gitignore
+
+# Secrets and local runtime state never go into the image.
+.env
+.env.*
+!.env.example
+.guest_codes.json
+.banned_discord_ids
+data/
+
+# Captures, docs, tests, backups, and local-only launchers are not needed at runtime.
 *.pcap
+*.h264
+*.jpg
+*.log
+*.tmp
 CAR WIFI INFO
 docs/
+test_*.py
+README.md
+LICENSE
+webapp.py.bak
+start*.sh
+docker-compose*.yml
