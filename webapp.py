@@ -118,6 +118,10 @@ _load_guest_codes()
 
 # Active guest sessions: {guest_user_id: {"code": str, "expires_at": time}}
 active_guest_sessions = {}
+REDEEM_DEBUG_LOG = Path(os.environ.get(
+    "REDEEM_DEBUG_LOG",
+    Path(__file__).parent / "data" / "redeem-debug.log",
+))
 
 DISCORD_API = "https://discord.com/api"
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://race.zen-rc.net").rstrip("/")
@@ -1046,22 +1050,23 @@ def api_redeem_code():
     code = data.get("code", "").strip()
     src = request.remote_addr
     ua = request.headers.get("User-Agent", "")[:60]
-    with open("/tmp/redeem-debug.log", "a") as _f:
+    REDEEM_DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
+    with open(REDEEM_DEBUG_LOG, "a") as _f:
         _f.write(f"{datetime.datetime.now()} REDEEM from={src} raw_code={code!r} content_type={request.content_type} ua={ua}\n")
     if not code:
-        with open("/tmp/redeem-debug.log", "a") as _f:
+        with open(REDEEM_DEBUG_LOG, "a") as _f:
             _f.write(f"  -> REJECTED: no_code_provided, data={data!r}\n")
         return jsonify({"ok": False, "error": "no_code_provided"}), 400
     user, error = redeem_guest_code(code)
     if error:
         with guest_codes_lock:
             known = list(guest_codes.keys())
-        with open("/tmp/redeem-debug.log", "a") as _f:
+        with open(REDEEM_DEBUG_LOG, "a") as _f:
             _f.write(f"  -> FAILED: error={error!r} known_codes_count={len(known)}\n")
         return jsonify({"ok": False, "error": error}), 403
     session["user"] = user
     session["is_guest"] = True
-    with open("/tmp/redeem-debug.log", "a") as _f:
+    with open(REDEEM_DEBUG_LOG, "a") as _f:
         _f.write(f"  -> OK: guest_id={user['id']}\n")
     return jsonify({"ok": True, "user": public_user(user), "expires_at": user["guest_expires_at"]})
 
@@ -1428,17 +1433,17 @@ def ws_control_command(data):
 
 if __name__ == "__main__":
     ensure_timer()
-    # Auto-connect to car on startup
     init_car()
-    try:
-        success = car.connect()
-        if success:
-            decoder.start()
-            print(f"  Car connected: {car.state.value}")
-        else:
-            print(f"  Car connection failed: {car.state.value}")
-    except Exception as e:
-        print(f"  Car connect error: {e}")
+    if os.environ.get("AUTO_CONNECT_CAR", "").lower() in {"1", "true", "yes"}:
+        try:
+            success = car.connect()
+            if success:
+                decoder.start()
+                print(f"  Car connected: {car.state.value}")
+            else:
+                print(f"  Car connection failed: {car.state.value}")
+        except Exception as e:
+            print(f"  Car connect error: {e}")
     print("=" * 60)
     print("  WLtoys FPV Car - Race Lobby Cockpit")
     print("  http://localhost:5555")

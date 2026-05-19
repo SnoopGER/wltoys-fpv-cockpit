@@ -1,0 +1,7 @@
+tunnel: <tunnel-id>
+credentials-file: C:\Users\Administrator\.cloudflared\<tunnel-id>.json
+
+ingress:
+  - hostname: garden.zen-rc.net
+    service: http://localhost:5555
+  - service: http_status:404

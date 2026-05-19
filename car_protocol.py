@@ -15,6 +15,8 @@ Header structure (32 bytes):
   Bytes 32+:   Raw H.264 Annex B data
 """
 
+import platform
+import shutil
 import socket
 import struct
 import threading
@@ -159,6 +161,7 @@ class CarProtocol:
         
         self._recv_sock: Optional[socket.socket] = None
         self._hb_sock: Optional[socket.socket] = None
+        self._cmd_sock: Optional[socket.socket] = None
         self._hb_thread: Optional[threading.Thread] = None
         self._recv_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -198,21 +201,22 @@ class CarProtocol:
         
         # Check reachability
         import subprocess
-        try:
-            result = subprocess.run(
-                ["ping", "-c", "1", "-W", "2", self.car_ip],
-                capture_output=True, timeout=5
-            )
-            if result.returncode != 0:
-                self.log("ERROR", f"Car not reachable at {self.car_ip}")
-                self.state = ConnectionState.ERROR
-                return False
-        except Exception as e:
-            self.log("ERROR", f"Ping failed: {e}")
-            self.state = ConnectionState.ERROR
-            return False
-        
-        self.log("OK", f"Car reachable at {self.car_ip}")
+        if shutil.which("ping"):
+            try:
+                ping_cmd = (
+                    ["ping", "-n", "1", "-w", "2000", self.car_ip]
+                    if platform.system().lower() == "windows"
+                    else ["ping", "-c", "1", "-W", "2", self.car_ip]
+                )
+                result = subprocess.run(ping_cmd, capture_output=True, timeout=5)
+                if result.returncode != 0:
+                    self.log("WARN", f"Ping did not reach {self.car_ip}, trying UDP handshake anyway")
+                else:
+                    self.log("OK", f"Car reachable at {self.car_ip}")
+            except Exception as e:
+                self.log("WARN", f"Ping check failed, trying UDP handshake anyway: {e}")
+        else:
+            self.log("WARN", "Ping command not available, trying UDP handshake anyway")
         
         # Send handshake
         try:
@@ -234,6 +238,7 @@ class CarProtocol:
         
         # Start heartbeat thread
         self._hb_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._hb_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
         self._hb_thread.start()
         self.log("OK", "Heartbeat thread started (port 23458)")
@@ -276,6 +281,13 @@ class CarProtocol:
             except Exception:
                 pass
             self._hb_sock = None
+
+        if self._cmd_sock:
+            try:
+                self._cmd_sock.close()
+            except Exception:
+                pass
+            self._cmd_sock = None
         
         self.state = ConnectionState.DISCONNECTED
         self.log("OK", "Disconnected")
@@ -357,13 +369,12 @@ class CarProtocol:
         chk = str_val ^ thr_val ^ 0x80
 
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             hdr = bytes.fromhex("ca47d5000000000066")
             cmd = hdr + bytes([str_val, thr_val, 0x80, 0x00, 0x00, chk, 0x99])
-            sock.sendto(cmd, (self.car_ip, 23458))
-            sock.close()
+            if self._cmd_sock is None:
+                self._cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self._cmd_sock.sendto(cmd, (self.car_ip, 23458))
             self._last_motor_cmd = cmd  # Store for heartbeat reinforcement
-            self.log("TX", f"Motor: {command} spd={speed}% str={steer_range}% [{cmd.hex()}]")
             return True
         except Exception as e:
             self.log("ERROR", f"Command failed: {e}")

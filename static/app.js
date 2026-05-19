@@ -184,6 +184,10 @@ function stopMotor() {
 async function sendMotorCmd(command) {
   try {
     const payload = { command, speed: motorSpeed, steer_range: motorSteerRange, client_ts: Date.now() / 1000 };
+    if (socket && socket.connected) {
+      socket.volatile.emit('control:command', payload);
+      return;
+    }
     await fetch('/api/command', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

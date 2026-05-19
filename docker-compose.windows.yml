@@ -1,0 +1,30 @@
+services:
+  fpv-dashboard-v2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fpv-dashboard-v2:latest
+    container_name: fpv-dashboard-v2
+
+    env_file:
+      - .env.local
+
+    environment:
+      GUEST_CODES_FILE: /app/data/guest_codes.json
+      BANNED_DISCORD_IDS_FILE: /app/data/banned_discord_ids
+      PYTHONUNBUFFERED: "1"
+
+    ports:
+      - "5555:5555/tcp"
+      - "1234:1234/udp"
+      - "23458:23458/udp"
+      - "23459:23459/udp"
+
+    volumes:
+      - ./data:/app/data
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    restart: unless-stopped
+    stop_grace_period: 10s

@@ -35,7 +35,9 @@ Thumbs.db
 # Environment / secrets
 .env
 .env.local
+local.env
 .banned_discord_ids
+cloudflared-garden.yml
 
 # Guest code persistence
 .guest_codes.json

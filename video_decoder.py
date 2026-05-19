@@ -6,6 +6,7 @@ Every frame is fed to the codec in order (H.264 P-frames need previous frames).
 Encoded to JPEG via numpy + PIL.
 """
 
+import os
 import threading
 import time
 import io
@@ -24,14 +25,14 @@ class VideoDecoder:
     def __init__(self, width: int = 640, height: int = 360, quality: int = 75):
         self.width = width
         self.height = height
-        self.quality = quality  # JPEG quality 1-100 (75 = good balance)
+        self.quality = int(os.environ.get("JPEG_QUALITY", quality))
         self._lock = threading.Lock()
         self._latest_jpeg: Optional[bytes] = None
         self._frame_count = 0
         self._running = False
         self._got_keyframe = False
         self._thread: Optional[threading.Thread] = None
-        self._feed_queue: Queue = Queue(maxsize=100)
+        self._feed_queue: Queue = Queue(maxsize=int(os.environ.get("VIDEO_DECODE_QUEUE", "8")))
 
     def start(self):
         if self._running:
