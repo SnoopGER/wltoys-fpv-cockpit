@@ -6,6 +6,8 @@ Set-Location $Root
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $OutLog = Join-Path $Root "data\server.out.log"
 $ErrLog = Join-Path $Root "data\server.err.log"
+$TunnelScript = Join-Path $Root "start-cloudflare-garden-tunnel.ps1"
+$Cloudflared = "C:\Users\Administrator\Downloads\cloudflared-windows-amd64.exe"
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
 
@@ -58,6 +60,31 @@ try {
         Select-Object -ExpandProperty Content
 } catch {
     Write-Host "Dashboard did not answer yet. Check logs above."
+}
+
+Write-Host ""
+Write-Host "Starting Cloudflare tunnel for https://garden.zen-rc.net ..."
+$tunnelRunning = Get-CimInstance Win32_Process |
+    Where-Object {
+        $_.Name -eq "cloudflared-windows-amd64.exe" -and
+        $_.CommandLine -like "*garden-zen-rc*"
+    }
+
+if ($tunnelRunning) {
+    Write-Host "Cloudflare tunnel is already running."
+} elseif ((Test-Path $Cloudflared) -and (Test-Path $TunnelScript)) {
+    Start-Process -FilePath "powershell.exe" `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$TunnelScript`"" `
+        -WorkingDirectory $Root `
+        -WindowStyle Minimized
+    Start-Sleep -Seconds 6
+    try {
+        & $Cloudflared tunnel info garden-zen-rc
+    } catch {
+        Write-Host "Tunnel start was requested, but status check failed. Check the tunnel window/log output."
+    }
+} else {
+    Write-Host "Tunnel not started. Missing cloudflared exe or tunnel script."
 }
 
 Write-Host ""
