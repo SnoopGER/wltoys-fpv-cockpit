@@ -136,6 +136,143 @@ main {
   gap: 12px;
 }
 
+.race-main {
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 14px;
+  min-height: calc(100vh - 70px);
+}
+
+.race-stage {
+  min-height: calc(100vh - 94px);
+}
+
+.race-panel-header {
+  min-height: 44px;
+}
+
+.race-video {
+  min-height: calc(100vh - 140px);
+}
+
+.race-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.race-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg2);
+  padding: 12px;
+}
+
+.race-card-title {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.race-driver-name {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid rgba(0, 204, 255, 0.22);
+  border-radius: 6px;
+  background: rgba(0, 204, 255, 0.06);
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.race-session-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.race-session-grid > div,
+.race-queue-meta,
+.race-mini-stats {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  padding: 8px;
+}
+
+.race-session-grid span,
+.race-queue-meta span,
+.race-mini-stats span {
+  display: block;
+  color: var(--dim);
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.race-session-grid strong,
+.race-queue-meta strong,
+.race-mini-stats strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--accent2);
+  font-size: 15px;
+}
+
+.race-connect-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.race-mini-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.race-queue-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.race-queue-meta span,
+.race-queue-meta strong {
+  display: inline;
+  margin: 0;
+}
+
+.race-queue-list {
+  min-height: 42px;
+  max-height: 110px;
+  overflow-y: auto;
+  margin: 10px 0 0 18px;
+}
+
+.race-drive-card {
+  padding-bottom: 14px;
+}
+
+.race-dpad {
+  max-width: 220px;
+}
+
+.race-sliders {
+  padding: 0;
+  margin-top: 10px;
+}
+
 /* ── Panel ─────────────────────────────────────────────── */
 .panel {
   background: var(--bg2);
@@ -868,6 +1005,13 @@ main {
 @media (max-width: 800px) {
   main {
     grid-template-columns: 1fr;
+  }
+  .race-main {
+    grid-template-columns: 1fr;
+  }
+  .race-stage,
+  .race-video {
+    min-height: 360px;
   }
   .video-container { min-height: 240px; }
   .race-hud {

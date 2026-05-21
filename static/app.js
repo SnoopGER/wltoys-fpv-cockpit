@@ -39,6 +39,11 @@ function isAdmin() { return userRole === 'admin'; }
 function isDriverRole() { return userRole === 'admin' || userRole === 'driver'; }
 function canConnect() { return document.body.dataset.canConnect === 'true'; }
 
+function setText(id, value) {
+  const el = $(id);
+  if (el) el.textContent = value;
+}
+
 function startVideoStream() {
   if (streaming) return;
   videoFeed.src = '/api/stream?t=' + Date.now();
@@ -175,16 +180,16 @@ async function pollStatus() {
       setStatus('connected', 'CONNECTED');
     }
 
-    $('infoPackets').textContent = s.packets_received.toLocaleString();
-    $('infoFrames').textContent = s.frames_assembled.toLocaleString();
-    $('infoDropped').textContent = s.frames_dropped;
-    $('infoIFrames').textContent = s.i_frames;
-    $('infoPFrames').textContent = s.p_frames;
-    $('infoLastSize').textContent = s.last_frame_size ? (s.last_frame_size / 1024).toFixed(1) + ' KB' : '--';
-    $('infoBitrate').textContent = s.current_bitrate ? s.current_bitrate.toFixed(0) + ' kbps' : '--';
-    $('infoBuffer').textContent = s.pending_frames;
-    $('infoUptime').textContent = s.uptime ? formatTime(s.uptime) : '--';
-    $('infoHB').textContent = s.heartbeat_count;
+    setText('infoPackets', s.packets_received.toLocaleString());
+    setText('infoFrames', s.frames_assembled.toLocaleString());
+    setText('infoDropped', s.frames_dropped);
+    setText('infoIFrames', s.i_frames);
+    setText('infoPFrames', s.p_frames);
+    setText('infoLastSize', s.last_frame_size ? (s.last_frame_size / 1024).toFixed(1) + ' KB' : '--');
+    setText('infoBitrate', s.current_bitrate ? s.current_bitrate.toFixed(0) + ' kbps' : '--');
+    setText('infoBuffer', s.pending_frames);
+    setText('infoUptime', s.uptime ? formatTime(s.uptime) : '--');
+    setText('infoHB', s.heartbeat_count);
 
     if (s.current_fps > 0) {
       fpsBadge.textContent = s.current_fps.toFixed(1) + ' fps';
@@ -1050,6 +1055,7 @@ function setStatus(state, text) {
 }
 
 function addLog(level, msg, ts) {
+  if (!logContainer) return;
   ts = ts || new Date().toLocaleTimeString('en-US', { hour12: false });
 
   const levelMap = {
@@ -1091,12 +1097,14 @@ function addLog(level, msg, ts) {
 }
 
 function clearLog() {
+  if (!logContainer) return;
   logContainer.innerHTML = '';
   allLogs = [];
   addLog('SYS', 'Log cleared.');
 }
 
 function filterLogs() {
+  if (!$('logFilterTx')) return;
   const filters = {
     'TX': $('logFilterTx').checked, 'RX': $('logFilterRx').checked,
     'OK': $('logFilterInfo').checked, 'INFO': $('logFilterInfo').checked,

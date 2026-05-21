@@ -163,5 +163,24 @@ class SessionPhysicsTests(unittest.TestCase):
         self.assertEqual(telemetry["max_throttle_pct"], 60)
 
 
+class ConnectPermissionTests(unittest.TestCase):
+    def setUp(self):
+        reset_lobby()
+
+    def test_allowlisted_driver_can_connect_car(self):
+        user = {"id": "driver", "username": "driver", "display_name": "Driver", "role": "driver"}
+
+        public = webapp.public_user(user)
+
+        self.assertTrue(public["can_connect"])
+
+    def test_spectator_cannot_connect_car(self):
+        user = {"id": "spectator", "username": "spectator", "display_name": "Spectator", "role": "spectator"}
+        with patch.object(webapp, "role_for_user", return_value="spectator"):
+            public = webapp.public_user(user)
+
+        self.assertFalse(public["can_connect"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -500,11 +500,11 @@ def require_admin():
 
 
 def require_can_connect():
-    """Allow admins and guests with can_connect flag."""
+    """Allow admins, allowlisted drivers, and guests with can_connect flag."""
     user, error = require_user()
     if error:
         return None, error
-    if is_admin(user):
+    if role_for_user(user["id"]) in {"admin", "driver"}:
         return user, None
     if user.get("is_guest") and user.get("can_connect"):
         return user, None
@@ -520,8 +520,8 @@ def public_user(user):
         role = user.get("role", "driver")
     else:
         role = role_for_user(user_id)
-    # can_connect: admins always, guests if flagged, others never
-    if role == "admin":
+    # can_connect: admins and allowlisted drivers can wake/connect the car; guests only if flagged.
+    if role in {"admin", "driver"}:
         can_connect = True
     elif user.get("is_guest") and user.get("can_connect"):
         can_connect = True

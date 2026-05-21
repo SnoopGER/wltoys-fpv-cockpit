@@ -48,7 +48,8 @@
   </div>
 </header>
 
-<!-- ─── MAIN GRID ──────────────────────────────────────── -->
+{% if user and user.role == 'admin' %}
+<!-- ─── ADMIN MAIN GRID ────────────────────────────────── -->
 <main>
   <!-- LEFT: Video + Controls -->
   <div class="panel video-panel">
@@ -270,7 +271,122 @@
   </div>
 </main>
 
+{% else %}
+<!-- ─── DRIVER / SPECTATOR RACE VIEW ───────────────────── -->
+<main class="race-main">
+  <section class="race-stage panel video-panel">
+    <div class="panel-header race-panel-header">
+      <span>LIVE FPV</span>
+      <div class="video-controls">
+        <button onclick="toggleFullscreen()" title="Fullscreen">⛶</button>
+        <button onclick="snapshot()" title="Snapshot">📷</button>
+      </div>
+    </div>
+    <div class="video-container race-video" id="videoContainer">
+      <img id="videoFeed" src="" alt="No video feed">
+      <div class="race-hud" id="raceHud">
+        <div class="race-gauge tire-gauge" id="tireGauge">
+          <div class="gauge-icon" aria-hidden="true">◉</div>
+          <div class="gauge-main">
+            <div class="gauge-topline">
+              <span class="gauge-label">TIRES</span>
+              <span class="gauge-value" id="tireTempValue">20%</span>
+            </div>
+            <div class="gauge-bar" aria-label="Tire temperature">
+              <div class="gauge-fill tire-fill tire-cold" id="tireTempFill" style="width:20%"></div>
+            </div>
+            <div class="gauge-state" id="tireTempState">COLD GRIP</div>
+          </div>
+        </div>
+        <div class="race-gauge engine-gauge" id="engineGauge">
+          <div class="gauge-icon engine-icon" aria-hidden="true">⚙</div>
+          <div class="gauge-main">
+            <div class="gauge-topline">
+              <span class="gauge-label">ENGINE</span>
+              <span class="gauge-value" id="engineTempValue">40°C</span>
+            </div>
+            <div class="gauge-bar" aria-label="Engine temperature">
+              <div class="gauge-fill engine-fill engine-cold" id="engineTempFill" style="width:0%"></div>
+            </div>
+            <div class="gauge-state" id="engineTempState">COLD MAP</div>
+          </div>
+        </div>
+      </div>
+      <div class="video-overlay" id="videoOverlay">
+        <div class="overlay-text">NO SIGNAL</div>
+        <div class="overlay-sub">Connect to car to start streaming</div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="race-sidebar">
+    <section class="race-card race-session-card">
+      <div class="race-card-title">SESSION</div>
+      <div class="race-driver-name" id="lobbyActiveDriver">--</div>
+      <div class="race-session-grid">
+        <div>
+          <span>Time Left</span>
+          <strong id="lobbyTimeLeft">--</strong>
+        </div>
+        <div>
+          <span>Car</span>
+          <strong id="lobbyCarStatus">offline</strong>
+        </div>
+      </div>
+      <div class="race-connect-row">
+        <button class="btn btn-green connect-allowed" id="btnConnect" onclick="doConnect()">CONNECT CAR</button>
+        <button class="btn btn-red connect-allowed" id="btnDisconnect" onclick="doDisconnect()" disabled>DISCONNECT</button>
+      </div>
+      <div class="race-mini-stats">
+        <span>Uptime <strong id="infoUptime">--</strong></span>
+        <span>HB <strong id="infoHB">0</strong></span>
+      </div>
+    </section>
+
+    <section class="race-card">
+      <div class="race-card-title">QUEUE</div>
+      <div class="race-queue-meta">
+        <span>Spectators</span>
+        <strong id="lobbySpectators">0</strong>
+      </div>
+      <ol id="queueList" class="queue-list race-queue-list"></ol>
+      <div class="race-connect-row">
+        <button class="btn btn-green driver-only" id="btnJoinQueue" onclick="joinQueue()">JOIN QUEUE</button>
+        <button class="btn btn-blue driver-only" onclick="leaveQueue()">LEAVE</button>
+      </div>
+    </section>
+
+    <section class="race-card race-drive-card">
+      <div class="race-card-title">DRIVE</div>
+      <div class="dpad race-dpad">
+        <div></div>
+        <button class="btn dpad-btn" onmousedown="startMotor('forward')" onmouseup="stopMotor()" onmouseleave="stopMotor()" ontouchstart="startMotor('forward')" ontouchend="stopMotor()">▲</button>
+        <div></div>
+        <button class="btn dpad-btn" onmousedown="startMotor('left')" onmouseup="stopMotor()" onmouseleave="stopMotor()" ontouchstart="startMotor('left')" ontouchend="stopMotor()">◀</button>
+        <button class="btn dpad-btn dpad-stop" onclick="stopMotor()">■</button>
+        <button class="btn dpad-btn" onmousedown="startMotor('right')" onmouseup="stopMotor()" onmouseleave="stopMotor()" ontouchstart="startMotor('right')" ontouchend="stopMotor()">▶</button>
+        <div></div>
+        <button class="btn dpad-btn" onmousedown="startMotor('reverse')" onmouseup="stopMotor()" onmouseleave="stopMotor()" ontouchstart="startMotor('reverse')" ontouchend="stopMotor()">▼</button>
+        <div></div>
+      </div>
+      <div class="motor-sliders race-sliders">
+        <div class="slider-row">
+          <label class="slider-label">Speed <span id="speedValue" class="slider-val">100%</span></label>
+          <input type="range" id="speedSlider" min="5" max="100" value="100" class="motor-slider">
+        </div>
+        <div class="slider-row">
+          <label class="slider-label">Steering <span id="steerValue" class="slider-val">100%</span></label>
+          <input type="range" id="steerSlider" min="5" max="100" value="100" class="motor-slider">
+        </div>
+      </div>
+      <p class="hint">WASD keys + gamepad controls are supported while driving</p>
+    </section>
+  </aside>
+</main>
+{% endif %}
+
 <!-- ─── LOG PANEL ──────────────────────────────────────── -->
+{% if user and user.role == 'admin' %}
 <section class="log-section">
   <div class="panel-header">
     <span>📋 DEBUG LOG</span>
@@ -291,6 +407,7 @@
     </div>
   </div>
 </section>
+{% endif %}
 
 <!-- ─── PROTOCOL REFERENCE (collapsible) ───────────────── -->
 {% if user and user.role == 'admin' %}
