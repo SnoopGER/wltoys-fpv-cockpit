@@ -1386,21 +1386,6 @@ def api_command():
     return jsonify(result), status
 
 
-@app.route("/api/lights", methods=["POST"])
-def api_lights():
-    user, error = require_user()
-    if error:
-        return error
-    with state_lock:
-        if not validate_control_user(user):
-            return jsonify({"ok": False, "error": "not_active_driver"}), 403
-    init_car()
-    data = request.get_json(silent=True) or {}
-    on = bool(data.get("on", True))
-    success = car.toggle_lights(on=on)
-    return jsonify({"ok": success, "lights": on})
-
-
 @app.route("/api/send_raw", methods=["POST"])
 def api_send_raw():
     user, error = require_admin()

@@ -249,34 +249,6 @@ async function sendMotorCmd(command) {
   } catch (e) {}
 }
 
-// ── Lights Toggle ────────────────────────────────────────
-let lightsOn = false;
-
-async function toggleLights() {
-  if (!connected) return;
-  lightsOn = !lightsOn;
-  try {
-    const resp = await fetch('/api/lights', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ on: lightsOn }),
-      credentials: 'include',
-    });
-    const data = await resp.json();
-    if (data.ok) {
-      addLog('TX', '💡 Lights ' + (lightsOn ? 'ON' : 'OFF'));
-      const btn = $('btnLights');
-      if (btn) btn.textContent = lightsOn ? '💡 LIGHTS ON' : '💡 LIGHTS';
-    } else {
-      addLog('ERR', 'Lights toggle failed: ' + (data.error || 'unknown'));
-      lightsOn = !lightsOn;  // Revert on failure
-    }
-  } catch (e) {
-    addLog('ERR', 'Lights error: ' + e.message);
-    lightsOn = !lightsOn;
-  }
-}
-
 // ── Lobby + Admin ───────────────────────────────────────
 function userLabel(user) {
   if (!user) return '--';
@@ -483,7 +455,7 @@ function updateRoleUi() {
   for (const el of document.querySelectorAll('.connect-allowed')) {
     el.style.display = canConnect() ? '' : 'none';
   }
-  for (const el of document.querySelectorAll('.dpad-btn, #btnLights, #speedSlider, #steerSlider')) {
+  for (const el of document.querySelectorAll('.dpad-btn, #speedSlider, #steerSlider')) {
     el.disabled = !canControl;
   }
 }
@@ -990,8 +962,7 @@ function handleGamepadButtons(gp) {
             }
           }
           break;
-        case 13: // D-pad down — toggle lights
-          toggleLights();
+        case 13: // D-pad down — reserved
           break;
       }
     }
