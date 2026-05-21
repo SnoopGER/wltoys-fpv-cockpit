@@ -35,6 +35,7 @@ Thumbs.db
 # Environment / secrets
 .env
 .env.local
+env.download
 local.env
 .banned_discord_ids
 cloudflared-garden.yml
