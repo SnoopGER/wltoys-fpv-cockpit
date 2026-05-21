@@ -307,11 +307,15 @@ function renderLobby(data) {
   const duration = $('adminDuration');
   const durationValue = $('adminDurationValue');
   if (speedLimit && speedValue) {
-    speedLimit.value = data.max_speed_percent;
+    if (document.activeElement !== speedLimit && speedLimit.dataset.editing !== 'true') {
+      speedLimit.value = data.max_speed_percent;
+    }
     speedValue.textContent = data.max_speed_percent + '%';
   }
   if (duration && durationValue) {
-    duration.value = data.session_duration;
+    if (document.activeElement !== duration && duration.dataset.editing !== 'true') {
+      duration.value = data.session_duration;
+    }
     durationValue.textContent = data.session_duration + 's';
   }
 
@@ -442,12 +446,18 @@ function unbanDiscordIdInput() {
 
 function setAdminSpeed() {
   const input = $('adminSpeedLimit');
-  if (input) adminAction('set_max_speed', { value: parseInt(input.value) });
+  if (input) {
+    input.dataset.editing = 'false';
+    adminAction('set_max_speed', { value: parseInt(input.value) });
+  }
 }
 
 function setSessionDuration() {
   const input = $('adminDuration');
-  if (input) adminAction('set_session_duration', { value: parseInt(input.value) });
+  if (input) {
+    input.dataset.editing = 'false';
+    adminAction('set_session_duration', { value: parseInt(input.value) });
+  }
 }
 
 function updateRoleUi() {
@@ -1195,6 +1205,10 @@ function initSliders() {
   const speedValue = $('speedValue');
   const steerSlider = $('steerSlider');
   const steerValue = $('steerValue');
+  const adminSpeedLimit = $('adminSpeedLimit');
+  const adminSpeedValue = $('adminSpeedValue');
+  const adminDuration = $('adminDuration');
+  const adminDurationValue = $('adminDurationValue');
 
   if (speedSlider) {
     speedSlider.addEventListener('input', () => {
@@ -1207,6 +1221,31 @@ function initSliders() {
       motorSteerRange = parseInt(steerSlider.value);
       steerValue.textContent = motorSteerRange + '%';
     });
+  }
+  if (adminSpeedLimit && adminSpeedValue) {
+    adminSpeedLimit.addEventListener('pointerdown', () => { adminSpeedLimit.dataset.editing = 'true'; });
+    adminSpeedLimit.addEventListener('focus', () => { adminSpeedLimit.dataset.editing = 'true'; });
+    adminSpeedLimit.addEventListener('input', () => {
+      adminSpeedLimit.dataset.editing = 'true';
+      adminSpeedValue.textContent = parseInt(adminSpeedLimit.value) + '%';
+    });
+    adminSpeedLimit.addEventListener('change', () => {
+      adminSpeedLimit.dataset.editing = 'false';
+      setAdminSpeed();
+    });
+    adminSpeedLimit.addEventListener('blur', () => { adminSpeedLimit.dataset.editing = 'false'; });
+  }
+  if (adminDuration && adminDurationValue) {
+    adminDuration.addEventListener('focus', () => { adminDuration.dataset.editing = 'true'; });
+    adminDuration.addEventListener('input', () => {
+      adminDuration.dataset.editing = 'true';
+      adminDurationValue.textContent = parseInt(adminDuration.value || '0') + 's';
+    });
+    adminDuration.addEventListener('change', () => {
+      adminDuration.dataset.editing = 'false';
+      setSessionDuration();
+    });
+    adminDuration.addEventListener('blur', () => { adminDuration.dataset.editing = 'false'; });
   }
 }
 
