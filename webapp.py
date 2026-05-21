@@ -70,6 +70,23 @@ decoder = None
 state_lock = threading.RLock()
 timer_started = False
 
+TIRE_TEMP_MIN = 0.2
+TIRE_TEMP_MAX = 1.0
+TIRE_WARMUP_RATE = 0.023
+TIRE_COOLING_DELAY = 10.0
+TIRE_COOLING_RATE = 0.025
+TIRE_STEER_THRESHOLD = 10
+ENGINE_TEMP_MIN = 40.0
+ENGINE_TEMP_MAX = 110.0
+ENGINE_OPTIMAL_TEMP = 100.0
+ENGINE_HEAT_RATE = 2.4
+ENGINE_COOLING_DELAY = 10.0
+ENGINE_COOLING_RATE = 1.2
+ENGINE_THROTTLE_THRESHOLD = 20
+SESSION_DT_MAX = 1.0
+STEERING_COMMANDS = {"left", "right", "forward_left", "forward_right", "reverse_left", "reverse_right"}
+THROTTLE_COMMANDS = {"forward", "reverse", "forward_left", "forward_right", "reverse_left", "reverse_right"}
+
 # Guest Drive Codes: {code: {"created": time, "expires_at": time, "duration": int, "redeemed_by": str|None, "active": bool}}
 GUEST_CODES_FILE = Path(os.environ.get(
     "GUEST_CODES_FILE",
@@ -282,6 +299,7 @@ lobby = {
     "sid_to_user": {},
     "user_sids": {},
     "banned_ids": load_banned_ids(),
+    "driver_sessions": {},
 }
 
 
@@ -547,6 +565,11 @@ def lobby_snapshot():
         users = [public_user(u) for u in lobby["users"].values()]
         banned = sorted(lobby.get("banned_ids", set()))
         active_id = lobby["active_driver"]
+        active_session = None
+        if active_id:
+            state = driver_session_for(active_id)
+            update_tire_warmup(state, state.get("last_command", "stop"), state.get("last_steer_range", 100))
+            active_session = update_engine_temperature(state, state.get("last_command", "stop"), state.get("effective_speed", 100))
         try:
             me = public_user(current_user())
         except Exception:
@@ -557,6 +580,7 @@ def lobby_snapshot():
             "paused": lobby["paused"],
             "emergency_stop": lobby["emergency_stop"],
             "active_driver": public_user(lobby["users"].get(active_id)) if active_id else None,
+            "active_session": active_session,
             "remaining_drive_time": seconds_remaining(),
             "queue": [public_user(lobby["users"].get(uid, {"id": uid, "username": uid})) for uid in lobby["queue"]],
             "connected_spectators": [u for u in users if u and u["role"] == "spectator"],
@@ -593,11 +617,13 @@ def start_driver(user_id):
     lobby["driver_started_at"] = time.time()
     lobby.pop("paused_remaining", None)
     lobby["emergency_stop"] = False
+    lobby.setdefault("driver_sessions", {})[user_id] = new_driver_session(lobby["driver_started_at"])
 
 
 def next_driver_locked(reason):
     if lobby["active_driver"]:
         send_neutral(reason)
+        lobby.setdefault("driver_sessions", {}).pop(lobby["active_driver"], None)
     lobby["active_driver"] = None
     lobby["driver_started_at"] = None
     lobby.pop("paused_remaining", None)
@@ -727,6 +753,129 @@ def clamp_int(value, default, min_value, max_value):
     return max(min_value, min(max_value, value))
 
 
+def new_driver_session(now=None):
+    now = now or time.time()
+    return {
+        "tire_temp": TIRE_TEMP_MIN,
+        "last_steering_time": now,
+        "last_update": now,
+        "last_engine_update": now,
+        "effective_steer_range": 100,
+        "effective_speed": 100,
+        "last_steer_range": 100,
+        "engine_temp": ENGINE_TEMP_MIN,
+        "last_throttle_time": now,
+        "corner_speed_cap": int(round(60 + (40 * TIRE_TEMP_MIN))),
+        "last_command": "stop",
+    }
+
+
+def driver_session_for(user_id, now=None):
+    now = now or time.time()
+    sessions = lobby.setdefault("driver_sessions", {})
+    if user_id not in sessions:
+        sessions[user_id] = new_driver_session(now)
+    return sessions[user_id]
+
+
+def tire_visual_state(tire_temp):
+    if tire_temp >= 0.9:
+        return "optimal"
+    if tire_temp >= 0.6:
+        return "hot"
+    if tire_temp >= 0.3:
+        return "warming"
+    return "cold"
+
+
+def session_snapshot(state):
+    tire_temp = max(TIRE_TEMP_MIN, min(TIRE_TEMP_MAX, float(state.get("tire_temp", TIRE_TEMP_MIN))))
+    engine_temp = max(ENGINE_TEMP_MIN, min(ENGINE_TEMP_MAX, float(state.get("engine_temp", ENGINE_TEMP_MIN))))
+    steering_multiplier = 0.6 + (0.4 * tire_temp)
+    corner_speed_cap = int(round(60 + (40 * tire_temp)))
+    max_throttle_pct = min(100.0, 60 + ((engine_temp - ENGINE_TEMP_MIN) * (40 / 60)))
+    return {
+        "tire_temp": round(tire_temp, 3),
+        "tire_percent": int(round(tire_temp * 100)),
+        "tire_state": tire_visual_state(tire_temp),
+        "steering_multiplier": round(steering_multiplier, 3),
+        "corner_speed_cap": corner_speed_cap,
+        "effective_steer_range": int(round(state.get("effective_steer_range", 100))),
+        "engine_temp": round(engine_temp, 1),
+        "engine_percent": int(round(max(0, min(100, ((engine_temp - ENGINE_TEMP_MIN) / (ENGINE_OPTIMAL_TEMP - ENGINE_TEMP_MIN)) * 100)))),
+        "engine_state": engine_visual_state(engine_temp),
+        "max_throttle_pct": int(round(max_throttle_pct)),
+        "effective_speed": int(round(state.get("effective_speed", 100))),
+    }
+
+
+def engine_visual_state(engine_temp):
+    if engine_temp >= 95:
+        return "optimal"
+    if engine_temp >= 80:
+        return "hot"
+    if engine_temp >= 55:
+        return "warming"
+    return "cold"
+
+
+def update_tire_warmup(state, command, steer_range, now=None):
+    now = now or time.time()
+    last_update = float(state.get("last_update", now))
+    dt = max(0.0, min(SESSION_DT_MAX, now - last_update))
+    tire_temp = max(TIRE_TEMP_MIN, min(TIRE_TEMP_MAX, float(state.get("tire_temp", TIRE_TEMP_MIN))))
+    active_steering = command in STEERING_COMMANDS and steer_range >= TIRE_STEER_THRESHOLD
+
+    if active_steering:
+        tire_temp = min(TIRE_TEMP_MAX, tire_temp + (TIRE_WARMUP_RATE * dt))
+        state["last_steering_time"] = now
+    elif now - float(state.get("last_steering_time", now)) > TIRE_COOLING_DELAY:
+        tire_temp = max(TIRE_TEMP_MIN, tire_temp - (TIRE_COOLING_RATE * dt))
+
+    state["tire_temp"] = tire_temp
+    state["last_update"] = now
+    state["last_command"] = command
+    state["last_steer_range"] = steer_range
+    return session_snapshot(state)
+
+
+def update_engine_temperature(state, command, speed, now=None):
+    now = now or time.time()
+    last_update = float(state.get("last_engine_update", now))
+    dt = max(0.0, min(SESSION_DT_MAX, now - last_update))
+    engine_temp = max(ENGINE_TEMP_MIN, min(ENGINE_TEMP_MAX, float(state.get("engine_temp", ENGINE_TEMP_MIN))))
+    active_throttle = command in THROTTLE_COMMANDS and speed >= ENGINE_THROTTLE_THRESHOLD
+
+    if active_throttle:
+        engine_temp = min(ENGINE_TEMP_MAX, engine_temp + (ENGINE_HEAT_RATE * (speed / 100) * dt))
+        state["last_throttle_time"] = now
+    elif now - float(state.get("last_throttle_time", now)) > ENGINE_COOLING_DELAY:
+        engine_temp = max(ENGINE_TEMP_MIN, engine_temp - (ENGINE_COOLING_RATE * dt))
+
+    state["engine_temp"] = engine_temp
+    state["last_engine_update"] = now
+    return session_snapshot(state)
+
+
+def apply_session_modifiers(user_id, command, speed, steer_range, now=None):
+    state = driver_session_for(user_id, now)
+    telemetry = update_tire_warmup(state, command, steer_range, now)
+    telemetry = update_engine_temperature(state, command, speed, now)
+
+    steering_multiplier = telemetry["steering_multiplier"]
+    effective_steer_range = int(round(steer_range * steering_multiplier))
+    effective_speed = min(speed, telemetry["max_throttle_pct"])
+
+    if command in STEERING_COMMANDS and command in THROTTLE_COMMANDS:
+        effective_speed = min(effective_speed, int(round(speed * (telemetry["corner_speed_cap"] / 100))))
+
+    state["effective_steer_range"] = effective_steer_range
+    state["effective_speed"] = effective_speed
+    telemetry["effective_steer_range"] = effective_steer_range
+    telemetry["effective_speed"] = effective_speed
+    return effective_speed, effective_steer_range, telemetry
+
+
 def handle_control_command(user, data):
     init_car()
     with state_lock:
@@ -738,9 +887,10 @@ def handle_control_command(user, data):
         speed = clamp_int(data.get("speed", 100), 100, 0, 100)
         steer_range = clamp_int(data.get("steer_range", 100), 100, 0, 100)
         speed = min(speed, max_speed)
+        speed, steer_range, telemetry = apply_session_modifiers(user["id"], cmd, speed, steer_range)
 
     success = car.send_command(cmd, speed=speed, steer_range=steer_range)
-    return {"ok": success, "command": cmd, "speed": speed, "steer_range": steer_range}
+    return {"ok": success, "command": cmd, "speed": speed, "steer_range": steer_range, "telemetry": telemetry}
 
 
 def local_request():

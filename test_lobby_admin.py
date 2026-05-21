@@ -22,6 +22,7 @@ def reset_lobby():
         "users": {},
         "sid_to_user": {},
         "user_sids": {},
+        "driver_sessions": {},
     })
     if "banned_ids" in webapp.lobby:
         webapp.lobby["banned_ids"] = set()
@@ -90,6 +91,76 @@ class AdminModerationTests(unittest.TestCase):
 
         self.assertTrue(changed)
         self.assertNotIn("driver", webapp.lobby["banned_ids"])
+
+
+class SessionPhysicsTests(unittest.TestCase):
+    def setUp(self):
+        reset_lobby()
+
+    def test_start_driver_initializes_cold_tire_session(self):
+        webapp.start_driver("driver")
+
+        state = webapp.lobby["driver_sessions"]["driver"]
+        self.assertEqual(state["tire_temp"], webapp.TIRE_TEMP_MIN)
+        self.assertEqual(state["engine_temp"], webapp.ENGINE_TEMP_MIN)
+        self.assertEqual(webapp.session_snapshot(state)["tire_state"], "cold")
+
+    def test_active_steering_warms_tires(self):
+        now = 1000.0
+        state = webapp.new_driver_session(now)
+
+        telemetry = webapp.update_tire_warmup(state, "left", 100, now + 1.0)
+
+        self.assertGreater(telemetry["tire_temp"], webapp.TIRE_TEMP_MIN)
+        self.assertGreater(telemetry["steering_multiplier"], 0.68)
+
+    def test_idle_after_delay_cools_tires(self):
+        now = 1000.0
+        state = webapp.new_driver_session(now)
+        state["tire_temp"] = 0.8
+        state["last_steering_time"] = now - 20
+        state["last_update"] = now
+
+        telemetry = webapp.update_tire_warmup(state, "stop", 100, now + 1.0)
+
+        self.assertLess(telemetry["tire_temp"], 0.8)
+
+    def test_active_throttle_warms_engine(self):
+        now = 1000.0
+        state = webapp.new_driver_session(now)
+
+        telemetry = webapp.update_engine_temperature(state, "forward", 100, now + 1.0)
+
+        self.assertGreater(telemetry["engine_temp"], webapp.ENGINE_TEMP_MIN)
+        self.assertGreater(telemetry["max_throttle_pct"], 60)
+
+    def test_idle_after_delay_cools_engine(self):
+        now = 1000.0
+        state = webapp.new_driver_session(now)
+        state["engine_temp"] = 90
+        state["last_throttle_time"] = now - 20
+        state["last_engine_update"] = now
+
+        telemetry = webapp.update_engine_temperature(state, "stop", 0, now + 1.0)
+
+        self.assertLess(telemetry["engine_temp"], 90)
+
+    def test_session_modifiers_reduce_cold_steering_throttle_and_corner_speed(self):
+        now = 1000.0
+        webapp.lobby["driver_sessions"]["driver"] = webapp.new_driver_session(now)
+
+        speed, steer_range, telemetry = webapp.apply_session_modifiers(
+            "driver",
+            "forward_left",
+            100,
+            100,
+            now + 0.1,
+        )
+
+        self.assertEqual(steer_range, 68)
+        self.assertEqual(speed, 60)
+        self.assertEqual(telemetry["corner_speed_cap"], 68)
+        self.assertEqual(telemetry["max_throttle_pct"], 60)
 
 
 if __name__ == "__main__":

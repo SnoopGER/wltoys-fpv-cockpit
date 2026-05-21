@@ -27,6 +27,12 @@ const videoOverlay = $('videoOverlay');
 const btnConnect = $('btnConnect');
 const btnDisconnect = $('btnDisconnect');
 const logContainer = $('logContainer');
+const tireTempValue = $('tireTempValue');
+const tireTempFill = $('tireTempFill');
+const tireTempState = $('tireTempState');
+const engineTempValue = $('engineTempValue');
+const engineTempFill = $('engineTempFill');
+const engineTempState = $('engineTempState');
 
 function isLoggedIn() { return userRole !== 'guest'; }
 function isAdmin() { return userRole === 'admin'; }
@@ -46,6 +52,52 @@ function stopVideoStream() {
   videoFeed.src = '';
   videoFeed.classList.remove('active');
   videoOverlay.classList.remove('hidden');
+}
+
+function tireStateLabel(state) {
+  const labels = {
+    cold: 'COLD GRIP',
+    warming: 'WARMING UP',
+    hot: 'GETTING HOT',
+    optimal: 'OPTIMAL GRIP',
+  };
+  return labels[state] || 'COLD GRIP';
+}
+
+function updateTireHud(telemetry) {
+  if (!telemetry || !tireTempValue || !tireTempFill || !tireTempState) return;
+  const percent = Math.max(0, Math.min(100, Math.round(telemetry.tire_percent || 20)));
+  const state = telemetry.tire_state || 'cold';
+  tireTempValue.textContent = percent + '%';
+  tireTempFill.style.width = percent + '%';
+  tireTempFill.className = 'gauge-fill tire-fill tire-' + state;
+  tireTempState.textContent = tireStateLabel(state);
+}
+
+function engineStateLabel(state) {
+  const labels = {
+    cold: 'COLD MAP',
+    warming: 'WARMING UP',
+    hot: 'ALMOST READY',
+    optimal: 'FULL POWER',
+  };
+  return labels[state] || 'COLD MAP';
+}
+
+function updateEngineHud(telemetry) {
+  if (!telemetry || !engineTempValue || !engineTempFill || !engineTempState) return;
+  const temp = Number(telemetry.engine_temp || 40);
+  const percent = Math.max(0, Math.min(100, Math.round(telemetry.engine_percent || 0)));
+  const state = telemetry.engine_state || 'cold';
+  engineTempValue.textContent = temp.toFixed(0) + '°C';
+  engineTempFill.style.width = percent + '%';
+  engineTempFill.className = 'gauge-fill engine-fill engine-' + state;
+  engineTempState.textContent = engineStateLabel(state);
+}
+
+function updateRaceHud(telemetry) {
+  updateTireHud(telemetry);
+  updateEngineHud(telemetry);
 }
 
 // ── Connection ───────────────────────────────────────────
@@ -233,6 +285,7 @@ function userLabel(user) {
 
 function renderLobby(data) {
   lobbyState = data;
+  updateRaceHud(data.active_session);
   const active = data.active_driver;
   canControl = isAdmin() || (active && active.id === userId && userRole === 'driver');
   connected = Boolean(data.car_online);
@@ -445,6 +498,7 @@ function initSocket() {
   socket.on('connect', () => addLog('SYS', 'Lobby socket connected.'));
   socket.on('lobby:update', renderLobby);
   socket.on('control:ack', (data) => {
+    if (data && data.telemetry) updateRaceHud(data.telemetry);
     if (data && !data.ok && data.error !== 'stale_command') {
       addLog('WARN', 'Command rejected: ' + data.error);
     }

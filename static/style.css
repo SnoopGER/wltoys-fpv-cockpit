@@ -183,6 +183,7 @@ main {
 .video-overlay {
   position: absolute;
   inset: 0;
+  z-index: 4;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -191,6 +192,108 @@ main {
 }
 
 .video-overlay.hidden { display: none; }
+
+.race-hud {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.race-gauge {
+  display: grid;
+  grid-template-columns: 34px minmax(150px, 190px);
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(224, 224, 232, 0.18);
+  border-radius: 6px;
+  background: rgba(10, 10, 15, 0.82);
+  box-shadow: 0 0 18px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.gauge-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid var(--blue);
+  color: var(--blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  box-shadow: inset 0 0 10px rgba(0, 204, 255, 0.22);
+}
+
+.gauge-main {
+  min-width: 0;
+}
+
+.gauge-topline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+}
+
+.gauge-label {
+  color: var(--dim);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.gauge-value {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.gauge-bar {
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.gauge-fill {
+  height: 100%;
+  width: 20%;
+  border-radius: inherit;
+  transition: width 0.25s ease, background 0.25s ease;
+}
+
+.tire-fill.tire-cold { background: linear-gradient(90deg, #2979ff, var(--blue)); }
+.tire-fill.tire-warming { background: linear-gradient(90deg, var(--blue), var(--yellow)); }
+.tire-fill.tire-hot { background: linear-gradient(90deg, var(--yellow), var(--orange)); }
+.tire-fill.tire-optimal { background: linear-gradient(90deg, var(--green), #b6ff6a); }
+
+.engine-icon {
+  border-color: var(--orange);
+  color: var(--orange);
+  box-shadow: inset 0 0 10px rgba(255, 136, 68, 0.22);
+}
+
+.engine-fill.engine-cold { background: linear-gradient(90deg, #2979ff, var(--blue)); }
+.engine-fill.engine-warming { background: linear-gradient(90deg, var(--blue), var(--yellow)); }
+.engine-fill.engine-hot { background: linear-gradient(90deg, var(--yellow), var(--orange)); }
+.engine-fill.engine-optimal { background: linear-gradient(90deg, var(--orange), var(--red)); }
+
+.gauge-state {
+  margin-top: 5px;
+  color: var(--accent2);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
 
 .overlay-text {
   font-size: 28px;
@@ -767,4 +870,17 @@ main {
     grid-template-columns: 1fr;
   }
   .video-container { min-height: 240px; }
+  .race-hud {
+    left: 8px;
+    top: 8px;
+  }
+  .race-gauge {
+    grid-template-columns: 28px minmax(120px, 1fr);
+    padding: 6px;
+  }
+  .gauge-icon {
+    width: 28px;
+    height: 28px;
+    font-size: 15px;
+  }
 }

@@ -65,6 +65,34 @@
     </div>
     <div class="video-container" id="videoContainer">
       <img id="videoFeed" src="" alt="No video feed">
+      <div class="race-hud" id="raceHud">
+        <div class="race-gauge tire-gauge" id="tireGauge">
+          <div class="gauge-icon" aria-hidden="true">◉</div>
+          <div class="gauge-main">
+            <div class="gauge-topline">
+              <span class="gauge-label">TIRES</span>
+              <span class="gauge-value" id="tireTempValue">20%</span>
+            </div>
+            <div class="gauge-bar" aria-label="Tire temperature">
+              <div class="gauge-fill tire-fill tire-cold" id="tireTempFill" style="width:20%"></div>
+            </div>
+            <div class="gauge-state" id="tireTempState">COLD GRIP</div>
+          </div>
+        </div>
+        <div class="race-gauge engine-gauge" id="engineGauge">
+          <div class="gauge-icon engine-icon" aria-hidden="true">⚙</div>
+          <div class="gauge-main">
+            <div class="gauge-topline">
+              <span class="gauge-label">ENGINE</span>
+              <span class="gauge-value" id="engineTempValue">40°C</span>
+            </div>
+            <div class="gauge-bar" aria-label="Engine temperature">
+              <div class="gauge-fill engine-fill engine-cold" id="engineTempFill" style="width:0%"></div>
+            </div>
+            <div class="gauge-state" id="engineTempState">COLD MAP</div>
+          </div>
+        </div>
+      </div>
       <div class="video-overlay" id="videoOverlay">
         <div class="overlay-text">NO SIGNAL</div>
         <div class="overlay-sub">Connect to car to start streaming</div>

@@ -8,7 +8,7 @@ os.environ.setdefault("DISCORD_CLIENT_ID", "client-id")
 os.environ.setdefault("DISCORD_CLIENT_SECRET", "client-secret")
 os.environ.setdefault(
     "DISCORD_REDIRECT_URIS",
-    "https://race.zen-rc.net/auth/discord/callback,http://192.168.178.142:5555/auth/discord/callback,http://localhost:5555/auth/discord/callback",
+    "https://race.zen-rc.net/auth/discord/callback,http://192.168.178.187:5555/auth/discord/callback,http://localhost:5555/auth/discord/callback,http://127.0.0.1:5555/auth/discord/callback",
 )
 os.environ.setdefault("DISCORD_REDIRECT_URI", "https://race.zen-rc.net/auth/discord/callback")
 
@@ -30,13 +30,13 @@ class DiscordRedirectSelectionTests(unittest.TestCase):
         return parse_qs(parsed.query)
 
     def test_lan_login_uses_lan_redirect_uri_and_state(self):
-        params = self.login_params_for_host("192.168.178.142:5555")
+        params = self.login_params_for_host("192.168.178.187:5555")
 
-        self.assertEqual(params["redirect_uri"], ["http://192.168.178.142:5555/auth/discord/callback"])
+        self.assertEqual(params["redirect_uri"], ["http://192.168.178.187:5555/auth/discord/callback"])
         self.assertIn("state", params)
-        with self.client.session_transaction(base_url="http://192.168.178.142:5555") as sess:
+        with self.client.session_transaction(base_url="http://192.168.178.187:5555") as sess:
             self.assertEqual(sess["discord_oauth_state"], params["state"][0])
-            self.assertEqual(sess["discord_oauth_redirect_uri"], "http://192.168.178.142:5555/auth/discord/callback")
+            self.assertEqual(sess["discord_oauth_redirect_uri"], "http://192.168.178.187:5555/auth/discord/callback")
 
     def test_public_login_uses_public_redirect_uri_and_state(self):
         params = self.login_params_for_host("race.zen-rc.net")
@@ -54,7 +54,7 @@ class DiscordRedirectSelectionTests(unittest.TestCase):
 
         response = self.client.get(
             "/auth/discord/callback?code=abc&state=wrong",
-            headers={"Host": "192.168.178.142:5555"},
+            headers={"Host": "192.168.178.187:5555"},
         )
 
         self.assertEqual(response.status_code, 400)
@@ -69,7 +69,7 @@ class SessionCookieConfigTests(unittest.TestCase):
             self.assertEqual(webapp.app.session_interface.get_cookie_samesite(webapp.app), "Lax")
 
     def test_lan_host_uses_http_local_cookie(self):
-        with webapp.app.test_request_context("/", headers={"Host": "192.168.178.142:5555"}, base_url="http://192.168.178.142:5555"):
+        with webapp.app.test_request_context("/", headers={"Host": "192.168.178.187:5555"}, base_url="http://192.168.178.187:5555"):
             self.assertFalse(webapp.app.session_interface.get_cookie_secure(webapp.app))
             self.assertIsNone(webapp.app.session_interface.get_cookie_domain(webapp.app))
             self.assertEqual(webapp.app.session_interface.get_cookie_samesite(webapp.app), "Lax")
