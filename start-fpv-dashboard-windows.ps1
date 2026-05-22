@@ -8,6 +8,10 @@ $OutLog = Join-Path $Root "data\server.out.log"
 $ErrLog = Join-Path $Root "data\server.err.log"
 $TunnelScript = Join-Path $Root "start-cloudflare-garden-tunnel.ps1"
 $Cloudflared = "C:\Users\Administrator\Downloads\cloudflared-windows-amd64.exe"
+$CarSsids = @(
+    "WL_FPV_CAR_64886271",
+    "WL_FPV_CAR_99613492"
+)
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
 
@@ -28,8 +32,18 @@ foreach ($listener in $listeners) {
     Stop-Process -Id $listener -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "Connecting TP-Link WiFi adapter to WL_FPV_CAR_99613492 if available..."
-netsh wlan connect name="WL_FPV_CAR_99613492" ssid="WL_FPV_CAR_99613492" interface="WiFi" | Out-Null
+Write-Host "Connecting TP-Link WiFi adapter to a saved WLtoys car profile if available..."
+foreach ($ssid in $CarSsids) {
+    Write-Host "Trying WiFi SSID: $ssid"
+    netsh wlan connect name="$ssid" ssid="$ssid" interface="WiFi" | Out-Null
+    Start-Sleep -Seconds 3
+    $wifiConfig = Get-NetIPConfiguration -InterfaceAlias WiFi -ErrorAction SilentlyContinue
+    $wifiIp = $wifiConfig.IPv4Address.IPAddress
+    if ($wifiIp -like "172.16.11.*") {
+        Write-Host "Connected to car WiFi: $ssid ($wifiIp)"
+        break
+    }
+}
 
 Write-Host "Starting dashboard..."
 Remove-Item $OutLog, $ErrLog -ErrorAction SilentlyContinue

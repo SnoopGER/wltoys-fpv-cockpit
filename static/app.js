@@ -1442,6 +1442,6 @@ if (isLoggedIn()) {
 }
 }
 addLog('SYS', '🏎️ FPV Debug Cockpit loaded.');
-addLog('SYS', 'Car: WL_FPV_CAR_99613492 @ 172.16.11.1');
+addLog('SYS', 'Car: WL_FPV_CAR_64886271 / WL_FPV_CAR_99613492 @ 172.16.11.1');
 addLog('SYS', 'Codec: H.264 Baseline 640×360 @ 20fps');
 addLog('SYS', 'Motor: Hold WASD/D-pad/gamepad for continuous control (20Hz).');

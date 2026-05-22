@@ -8,7 +8,7 @@ Docker Desktop works for the web dashboard, but the WLtoys car uses fixed UDP tr
 
 - dashboard on `http://localhost:5555`
 - LAN dashboard on `http://192.168.22.75:5555`
-- car WiFi adapter connected to `WL_FPV_CAR_99613492`
+- car WiFi adapter connected to `WL_FPV_CAR_64886271` or `WL_FPV_CAR_99613492`
 - car IP `172.16.11.1`
 - video UDP listen port `1234`
 - control/heartbeat UDP port `23458`
@@ -31,7 +31,7 @@ Or run from the project folder:
 The launcher:
 
 - stops any old listener on TCP `5555`
-- tries to connect the TP-Link WiFi adapter to `WL_FPV_CAR_99613492`
+- tries to connect the TP-Link WiFi adapter to a saved WLtoys car SSID
 - starts `webapp.py` through the local virtualenv
 - writes logs to `data\server.out.log` and `data\server.err.log`
 

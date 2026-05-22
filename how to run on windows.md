@@ -15,7 +15,7 @@ Windows Python dashboard
         |
 TP-Link USB WiFi adapter
         |
-WL_FPV_CAR_99613492
+WL_FPV_CAR_64886271
         |
 172.16.11.1
 ```
@@ -52,7 +52,7 @@ The script:
 - creates `.venv` if missing
 - installs `requirements.txt` if the venv is created
 - stops any old process listening on TCP `5555`
-- tries to connect the TP-Link WiFi adapter to `WL_FPV_CAR_99613492`
+- tries to connect the TP-Link WiFi adapter to a saved WLtoys car SSID
 - starts `webapp.py` through `.venv`
 - writes logs to `data\server.out.log` and `data\server.err.log`
 
@@ -71,6 +71,7 @@ $ids | ForEach-Object { Stop-Process -Id $_ -Force }
 Saved SSID:
 
 ```text
+WL_FPV_CAR_64886271
 WL_FPV_CAR_99613492
 ```
 
@@ -113,7 +114,7 @@ The important route must be:
 If it routes through `Ethernet`, reconnect the car WiFi:
 
 ```powershell
-netsh wlan connect name="WL_FPV_CAR_99613492" ssid="WL_FPV_CAR_99613492" interface="WiFi"
+netsh wlan connect name="WL_FPV_CAR_64886271" ssid="WL_FPV_CAR_64886271" interface="WiFi"
 ```
 
 ## Cloudflare Tunnel
