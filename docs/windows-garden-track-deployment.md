@@ -59,6 +59,9 @@ The Garden Windows build supports two saved WLtoys car WiFi profiles:
 
 The `car3` WiFi password is the numeric suffix from the SSID. Keep the password in the
 local Windows WiFi profile; do not commit personal WiFi profile secrets to the public repo.
+`car3` appears to send the same WLtoys UDP framing, but may use a different video codec
+than the larger cars. The Windows decoder auto-detects H.264 and H.265/HEVC; check
+`/api/status?car=car3` and the `decoder_codec` field while testing.
 
 Run this after both cars are awake, or choose the matching action in `Garden FPV Control.bat`:
 

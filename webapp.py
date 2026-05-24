@@ -358,6 +358,7 @@ def all_car_snapshots():
         status["label"] = config["label"]
         status["ssid"] = config["ssid"]
         status["decoder_frames"] = slot["decoder"].frame_count
+        status["decoder_codec"] = slot["decoder"].codec_name
         result.append(status)
     return result
 
@@ -1343,6 +1344,7 @@ def api_status():
     decoder = slot["decoder"]
     status = car.get_status()
     status["decoder_frames"] = decoder.frame_count if decoder else 0
+    status["decoder_codec"] = decoder.codec_name if decoder else None
     status["car"] = car_id
     status["label"] = CAR_CONFIGS[car_id]["label"]
     status["ssid"] = CAR_CONFIGS[car_id]["ssid"]
