@@ -92,5 +92,23 @@ class AdminModerationTests(unittest.TestCase):
         self.assertNotIn("driver", webapp.lobby["banned_ids"])
 
 
+class PersistentCodeTests(unittest.TestCase):
+    def test_zenadmin_redeems_as_admin(self):
+        user, error = webapp.redeem_guest_code("ZENADMIN")
+
+        self.assertIsNone(error)
+        self.assertEqual(user["role"], "admin")
+        self.assertTrue(user["can_connect"])
+        self.assertTrue(webapp.is_admin(user))
+
+    def test_zengarden_redeems_as_driver(self):
+        user, error = webapp.redeem_guest_code("ZENGARDEN")
+
+        self.assertIsNone(error)
+        self.assertEqual(user["role"], "driver")
+        self.assertTrue(user["can_connect"])
+        self.assertFalse(webapp.is_admin(user))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -112,6 +112,17 @@ guest_codes["ZENGARDEN"] = {
     "redeemed_by": None,
     "active": True,
     "persistent": True,
+    "role": "driver",
+}
+
+guest_codes["ZENADMIN"] = {
+    "created": time.time(),
+    "expires_at": time.time() + (365 * 24 * 3600),  # 1 year
+    "duration": 365 * 24 * 3600,
+    "redeemed_by": None,
+    "active": True,
+    "persistent": True,
+    "role": "admin",
 }
 
 # Load saved codes from disk
@@ -452,19 +463,24 @@ def redeem_guest_code(code):
             entry["expires_at"] = time.time() + entry["duration"]
             entry["redeemed_at"] = time.time()
         _save_guest_codes()
+        role = entry.get("role", "driver")
+        if role not in {"admin", "driver", "spectator"}:
+            role = "driver"
+
         # Generate guest user
         guest_id = f"guest-{code}"
         remaining = int(entry["expires_at"] - time.time())
+        role_label = "Admin" if role == "admin" else "Driver"
         user = {
             "id": guest_id,
             "username": f"Guest-{code[-4:]}",
-            "display_name": f"Guest Driver ({code[-4:]})",
+            "display_name": f"Guest {role_label} ({code[-4:]})",
             "avatar": None,
-            "role": "driver",
+            "role": role,
             "is_guest": True,
             "guest_expires_at": entry["expires_at"],
             "guest_code": code,
-            "can_connect": True,
+            "can_connect": role in {"admin", "driver"},
         }
         # Track active guest session
         active_guest_sessions[guest_id] = {
@@ -1200,6 +1216,7 @@ def api_guest_test():
     return jsonify({
         "ok": True,
         "code": "ZENGARDEN",
+        "admin_code": "ZENADMIN",
         "message": "This is a persistent test code. It should always be redeemable.",
         "known_codes_count": len(guest_codes),
         "known_codes": list(guest_codes.keys()),
