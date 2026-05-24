@@ -266,6 +266,14 @@ CAR_CONFIGS = {
         "bind_ip": os.environ.get("FPV_CAR2_BIND_IP", ""),
         "listen_port": env_int("FPV_CAR2_LISTEN_PORT", 1234),
     },
+    "car3": {
+        "id": "car3",
+        "label": os.environ.get("FPV_CAR3_LABEL", "Car 3 / 10335160"),
+        "ssid": os.environ.get("FPV_CAR3_SSID", "WL FPV CAR 10335160"),
+        "ip": os.environ.get("FPV_CAR3_IP", "172.16.11.1"),
+        "bind_ip": os.environ.get("FPV_CAR3_BIND_IP", ""),
+        "listen_port": env_int("FPV_CAR3_LISTEN_PORT", 1234),
+    },
 }
 
 

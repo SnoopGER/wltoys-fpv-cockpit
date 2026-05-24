@@ -6,20 +6,23 @@ $Target = [System.Net.IPEndPoint]::new([System.Net.IPAddress]::Parse("172.16.11.
 
 $Mappings = @(
     @{ Name = "car1"; Interface = "WiFi"; Ssid = "WL_FPV_CAR_99613492"; FallbackIp = "172.16.11.3" },
-    @{ Name = "car2"; Interface = "WiFi 3"; Ssid = "WL_FPV_CAR_64886271"; FallbackIp = "172.16.11.2" }
+    @{ Name = "car2"; Interface = "WiFi 3"; Ssid = "WL_FPV_CAR_64886271"; FallbackIp = "172.16.11.2" },
+    @{ Name = "car3"; Interface = "WiFi 4"; Ssid = "WL FPV CAR 10335160"; FallbackIp = "172.16.11.4" }
 )
 
 foreach ($mapping in $Mappings) {
     $config = Get-NetIPConfiguration -InterfaceAlias $mapping.Interface -ErrorAction SilentlyContinue
-    $ip = $config.IPv4Address.IPAddress | Where-Object { $_ -like "172.16.11.*" } | Select-Object -First 1
+    $expectedIp = $mapping.FallbackIp
+    $assignedIps = @($config.IPv4Address.IPAddress | Where-Object { $_ -like "172.16.11.*" })
+    $ip = $assignedIps | Where-Object { $_ -eq $expectedIp } | Select-Object -First 1
     if (-not $ip) {
-        $ip = $mapping.FallbackIp
-        $assigned = Get-NetIPAddress -InterfaceAlias $mapping.Interface -IPAddress $ip -ErrorAction SilentlyContinue
-        if (-not $assigned) {
-            Write-Host "$($mapping.Name): $($mapping.Interface) has no usable $ip address; skipping until static IP is applied."
+        $wrongIp = $assignedIps | Select-Object -First 1
+        if ($wrongIp) {
+            Write-Host "$($mapping.Name): $($mapping.Interface) has $wrongIp, expected $expectedIp; skipping until static IP is applied."
             continue
         }
-        Write-Host "$($mapping.Name): $($mapping.Interface) using static fallback source $ip."
+        Write-Host "$($mapping.Name): $($mapping.Interface) has no usable $expectedIp address; skipping until static IP is applied."
+        continue
     }
 
     Write-Host "$($mapping.Name): sending handshake from $ip to 172.16.11.1:23459"

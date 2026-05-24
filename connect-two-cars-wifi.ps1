@@ -13,12 +13,18 @@ $Mappings = @(
         Interface = "WiFi 3"
         Ssid = "WL_FPV_CAR_64886271"
         Profile = Join-Path $Root "wl-fpv-car-64886271-wifi-profile.xml"
+    },
+    @{
+        Interface = "WiFi 4"
+        Ssid = "WL FPV CAR 10335160"
+        Profile = ""
     }
 )
 
 Write-Host "WLtoys fixed WiFi mapping"
 Write-Host "  WiFi   -> WL_FPV_CAR_99613492"
 Write-Host "  WiFi 3 -> WL_FPV_CAR_64886271"
+Write-Host "  WiFi 4 -> WL FPV CAR 10335160"
 Write-Host ""
 Write-Host "Wake both cars now. Their WiFi APs sleep after about 60 seconds."
 Write-Host ""

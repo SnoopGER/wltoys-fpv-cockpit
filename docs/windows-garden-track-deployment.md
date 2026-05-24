@@ -55,6 +55,10 @@ The Garden Windows build supports two saved WLtoys car WiFi profiles:
 
 - `car1`: `WL_FPV_CAR_99613492` on Windows interface `WiFi`, local bind IP `172.16.11.3`
 - `car2`: `WL_FPV_CAR_64886271` on Windows interface `WiFi 3`, local bind IP `172.16.11.2`
+- `car3`: `WL FPV CAR 10335160` on Windows interface `WiFi 4`, local bind IP `172.16.11.4`
+
+The `car3` WiFi password is the numeric suffix from the SSID. Keep the password in the
+local Windows WiFi profile; do not commit personal WiFi profile secrets to the public repo.
 
 Run this after both cars are awake, or choose the matching action in `Garden FPV Control.bat`:
 
@@ -69,12 +73,20 @@ If `car1` connects but Windows shows a `169.254.x.x` address, run this once as A
 .\set-car1-static-ip-admin.ps1
 ```
 
-The desktop helper `Prepare Car1 Static IP Admin.bat` opens the required administrator prompt.
+For the three-car setup, the Garden control app can open all static IP helpers from menu item `10`.
+The scripts are:
+
+```powershell
+.\set-car1-static-ip-admin.ps1  # WiFi   -> 172.16.11.3
+.\set-car2-static-ip-admin.ps1  # WiFi 3 -> 172.16.11.2
+.\set-car3-static-ip-admin.ps1  # WiFi 4 -> 172.16.11.4
+```
 
 Dashboard URLs:
 
 - `http://localhost:5555/car/car1`
 - `http://localhost:5555/car/car2`
+- `http://localhost:5555/car/car3`
 - `http://localhost:5555/admin/cars`
 
 For packet captures or debugging, run this while both car APs are awake:

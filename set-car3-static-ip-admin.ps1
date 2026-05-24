@@ -1,0 +1,54 @@
+$ErrorActionPreference = "Continue"
+
+$Interface = "WiFi 4"
+$Car3BindIp = "172.16.11.4"
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$EnvFile = Join-Path $Root ".env.local"
+
+Write-Host "Preparing $Interface for car3 with static IP $Car3BindIp/24"
+Write-Host "This script must run as Administrator."
+Write-Host ""
+
+try {
+    Set-NetIPInterface -InterfaceAlias $Interface -AddressFamily IPv4 -Dhcp Disabled -ErrorAction Stop
+    Write-Host "DHCP disabled on $Interface"
+} catch {
+    Write-Host "Failed to disable DHCP on ${Interface}: $($_.Exception.Message)"
+}
+
+Get-NetIPAddress -InterfaceAlias $Interface -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+    Where-Object { $_.IPAddress -ne $Car3BindIp } |
+    ForEach-Object {
+        try {
+            Remove-NetIPAddress -InterfaceAlias $Interface -IPAddress $_.IPAddress -Confirm:$false -ErrorAction SilentlyContinue
+        } catch {}
+    }
+
+if (-not (Get-NetIPAddress -InterfaceAlias $Interface -IPAddress $Car3BindIp -ErrorAction SilentlyContinue)) {
+    try {
+        New-NetIPAddress -InterfaceAlias $Interface -IPAddress $Car3BindIp -PrefixLength 24 -ErrorAction Stop | Out-Null
+        Write-Host "$Interface static IP set to $Car3BindIp/24"
+    } catch {
+        Write-Host "Failed to set static IP on ${Interface}: $($_.Exception.Message)"
+    }
+} else {
+    Write-Host "$Interface already has $Car3BindIp"
+}
+
+if (-not (Test-Path $EnvFile)) {
+    New-Item -ItemType File -Path $EnvFile -Force | Out-Null
+}
+
+$content = Get-Content -LiteralPath $EnvFile -ErrorAction SilentlyContinue
+if ($content -match "^FPV_CAR3_BIND_IP=") {
+    $content = $content -replace "^FPV_CAR3_BIND_IP=.*$", "FPV_CAR3_BIND_IP=$Car3BindIp"
+} else {
+    $content += "FPV_CAR3_BIND_IP=$Car3BindIp"
+}
+Set-Content -LiteralPath $EnvFile -Value $content -Encoding ASCII
+
+Write-Host ""
+Write-Host "Current IPv4 state:"
+Get-NetIPAddress -InterfaceAlias $Interface -AddressFamily IPv4 | Format-Table -Auto InterfaceAlias,IPAddress,PrefixLength,PrefixOrigin,AddressState
+Write-Host ""
+Write-Host "Updated $EnvFile"

@@ -9,6 +9,11 @@ $TunnelScript = Join-Path $Root "start-cloudflare-garden-tunnel.ps1"
 $BindIpsScript = Join-Path $Root "update-car-bind-ips.ps1"
 $HandshakeScript = Join-Path $Root "send-car-handshake.ps1"
 $LatencyScript = Join-Path $Root "check-latency-state.ps1"
+$StaticIpScripts = @(
+    Join-Path $Root "set-car1-static-ip-admin.ps1",
+    Join-Path $Root "set-car2-static-ip-admin.ps1",
+    Join-Path $Root "set-car3-static-ip-admin.ps1"
+)
 $Cloudflared = "C:\Users\Administrator\Downloads\cloudflared-windows-amd64.exe"
 $LocalBase = "http://localhost:5555"
 $LanBase = "http://192.168.22.75:5555"
@@ -76,6 +81,7 @@ function Show-Status {
     Write-Host "  Split: $LocalBase/admin/cars"
     Write-Host "  Car 1: $LocalBase/car/car1"
     Write-Host "  Car 2: $LocalBase/car/car2"
+    Write-Host "  Car 3: $LocalBase/car/car3"
     Write-Host "  LAN:   $LanBase"
     Write-Host "  Web:   $PublicBase"
 
@@ -141,6 +147,7 @@ function Open-DashboardLinks {
     Start-Process "$LocalBase/admin/cars"
     Start-Process "$LocalBase/car/car1"
     Start-Process "$LocalBase/car/car2"
+    Start-Process "$LocalBase/car/car3"
 }
 
 function Update-BindIps {
@@ -167,6 +174,19 @@ function Run-LatencyCheck {
     }
 }
 
+function Set-StaticCarIps {
+    Write-Host "Opening administrator prompts for static car WiFi IPs..."
+    foreach ($script in $StaticIpScripts) {
+        if (Test-Path $script) {
+            Start-Process powershell.exe `
+                -Verb RunAs `
+                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$script`""
+        } else {
+            Write-Host "Missing script: $script"
+        }
+    }
+}
+
 while ($true) {
     Show-Status
     Write-Host ""
@@ -180,6 +200,7 @@ while ($true) {
     Write-Host "  7  Update car bind IPs"
     Write-Host "  8  Send car handshakes"
     Write-Host "  9  Run latency/network check"
+    Write-Host "  10 Set static car WiFi IPs (admin)"
     Write-Host "  R  Refresh"
     Write-Host "  Q  Quit"
     Write-Host ""
@@ -195,6 +216,7 @@ while ($true) {
         "7" { Update-BindIps; Wait-Key }
         "8" { Send-Handshakes; Wait-Key }
         "9" { Run-LatencyCheck; Wait-Key }
+        "10" { Set-StaticCarIps; Wait-Key }
         "R" { }
         "Q" { break }
         default { Write-Host "Unknown choice."; Start-Sleep -Seconds 1 }
