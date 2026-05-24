@@ -19,10 +19,20 @@ Docker Desktop works for the web dashboard, but the WLtoys car uses fixed UDP tr
 Double-click the desktop launcher:
 
 ```text
-C:\Users\Administrator\Desktop\Start FPV Dashboard.bat
+C:\Users\Administrator\Desktop\Garden FPV Control.bat
 ```
 
-Or run from the project folder:
+The control app can:
+
+- start, stop, and restart the local dashboard
+- start and stop the Cloudflare Tunnel
+- show dashboard/tunnel/WiFi status
+- open the split view and both car pages
+- update car bind IPs after manually connecting the car WiFi networks
+- send handshake bursts for debugging
+- run the latency/network check
+
+Or run the dashboard-only starter from the project folder:
 
 ```powershell
 .\start-fpv-dashboard-windows.ps1
@@ -31,10 +41,13 @@ Or run from the project folder:
 The launcher:
 
 - stops any old listener on TCP `5555`
-- connects the fixed TP-Link WiFi adapters to the saved WLtoys car SSIDs
+- stops stale `webapp.py` Python processes from this project
 - updates `.env.local` with the current per-car bind IPs
 - starts `webapp.py` through the local virtualenv
 - writes logs to `data\server.out.log` and `data\server.err.log`
+
+Car WiFi connection is manual: connect car 1 on `WiFi`, connect car 2 on `WiFi 3`,
+then press CONNECT in each dashboard page.
 
 ## Two car setup
 
@@ -43,7 +56,7 @@ The Garden Windows build supports two saved WLtoys car WiFi profiles:
 - `car1`: `WL_FPV_CAR_99613492` on Windows interface `WiFi`, local bind IP `172.16.11.3`
 - `car2`: `WL_FPV_CAR_64886271` on Windows interface `WiFi 3`, local bind IP `172.16.11.2`
 
-Run this after both cars are awake:
+Run this after both cars are awake, or choose the matching action in `Garden FPV Control.bat`:
 
 ```powershell
 .\connect-two-cars-wifi.ps1

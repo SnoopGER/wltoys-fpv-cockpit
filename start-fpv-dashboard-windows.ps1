@@ -6,14 +6,7 @@ Set-Location $Root
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $OutLog = Join-Path $Root "data\server.out.log"
 $ErrLog = Join-Path $Root "data\server.err.log"
-$TunnelScript = Join-Path $Root "start-cloudflare-garden-tunnel.ps1"
-$ConnectCarsScript = Join-Path $Root "connect-two-cars-wifi.ps1"
 $BindIpsScript = Join-Path $Root "update-car-bind-ips.ps1"
-$Cloudflared = "C:\Users\Administrator\Downloads\cloudflared-windows-amd64.exe"
-$CarSsids = @(
-    "WL_FPV_CAR_64886271",
-    "WL_FPV_CAR_99613492"
-)
 
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data") | Out-Null
 
@@ -45,24 +38,6 @@ Get-CimInstance Win32_Process |
     ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     }
-
-if (Test-Path $ConnectCarsScript) {
-    Write-Host "Connecting fixed TP-Link WiFi adapters to both saved WLtoys car profiles..."
-    & $ConnectCarsScript
-} else {
-    Write-Host "Connecting TP-Link WiFi adapter to a saved WLtoys car profile if available..."
-    foreach ($ssid in $CarSsids) {
-        Write-Host "Trying WiFi SSID: $ssid"
-        netsh wlan connect name="$ssid" ssid="$ssid" interface="WiFi" | Out-Null
-        Start-Sleep -Seconds 3
-        $wifiConfig = Get-NetIPConfiguration -InterfaceAlias WiFi -ErrorAction SilentlyContinue
-        $wifiIp = $wifiConfig.IPv4Address.IPAddress
-        if ($wifiIp -like "172.16.11.*") {
-            Write-Host "Connected to car WiFi: $ssid ($wifiIp)"
-            break
-        }
-    }
-}
 
 if (Test-Path $BindIpsScript) {
     Write-Host "Updating per-car bind IPs from the connected WiFi adapters..."
@@ -101,29 +76,4 @@ try {
 }
 
 Write-Host ""
-Write-Host "Starting Cloudflare tunnel for https://garden.zen-rc.net ..."
-$tunnelRunning = Get-CimInstance Win32_Process |
-    Where-Object {
-        $_.Name -eq "cloudflared-windows-amd64.exe" -and
-        $_.CommandLine -like "*garden-zen-rc*"
-    }
-
-if ($tunnelRunning) {
-    Write-Host "Cloudflare tunnel is already running."
-} elseif ((Test-Path $Cloudflared) -and (Test-Path $TunnelScript)) {
-    Start-Process -FilePath "powershell.exe" `
-        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$TunnelScript`"" `
-        -WorkingDirectory $Root `
-        -WindowStyle Minimized
-    Start-Sleep -Seconds 6
-    try {
-        & $Cloudflared tunnel info garden-zen-rc
-    } catch {
-        Write-Host "Tunnel start was requested, but status check failed. Check the tunnel window/log output."
-    }
-} else {
-    Write-Host "Tunnel not started. Missing cloudflared exe or tunnel script."
-}
-
-Write-Host ""
-Write-Host "Tip: if car connect/video is slow, run .\check-latency-state.ps1 and confirm the car route uses WiFi."
+Write-Host "Tip: manually connect both car WiFi networks first, then press CONNECT in each car page."
