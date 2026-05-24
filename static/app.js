@@ -15,6 +15,12 @@ let canControl = true; // Default true; lobby system refines this when socket.io
 let socket = null;
 const userRole = document.body.dataset.userRole || 'guest';
 const userId = document.body.dataset.userId || '';
+const selectedCar = document.body.dataset.carId || 'car1';
+const carQuery = '?car=' + encodeURIComponent(selectedCar);
+
+function apiUrl(path) {
+  return path + (path.includes('?') ? '&' : '?') + 'car=' + encodeURIComponent(selectedCar);
+}
 
 // ── DOM Refs ─────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -35,7 +41,7 @@ function canConnect() { return document.body.dataset.canConnect === 'true'; }
 
 function startVideoStream() {
   if (streaming) return;
-  videoFeed.src = '/api/stream?t=' + Date.now();
+  videoFeed.src = apiUrl('/api/stream?t=' + Date.now());
   videoFeed.classList.add('active');
   videoOverlay.classList.add('hidden');
   streaming = true;
@@ -56,7 +62,7 @@ async function doConnect() {
   setStatus('connecting', 'CONNECTING...');
 
   try {
-    const resp = await fetch('/api/connect', { method: 'POST', credentials: 'include' });
+    const resp = await fetch(apiUrl('/api/connect'), { method: 'POST', credentials: 'include' });
     const data = await resp.json();
 
     if (data.ok) {
@@ -85,7 +91,7 @@ async function doConnect() {
 async function doDisconnect() {
   if (!canConnect()) return;
   stopMotor();
-  try { await fetch('/api/disconnect', { method: 'POST', credentials: 'include' }); } catch (e) {}
+  try { await fetch(apiUrl('/api/disconnect'), { method: 'POST', credentials: 'include' }); } catch (e) {}
 
   connected = false;
   stopVideoStream();
@@ -112,7 +118,7 @@ function stopPolling() {
 
 async function pollStatus() {
   try {
-    const resp = await fetch('/api/status', { credentials: 'include' });
+    const resp = await fetch(apiUrl('/api/status'), { credentials: 'include' });
     const s = await resp.json();
 
     connected = ['connected', 'streaming'].includes(s.state);
@@ -143,7 +149,7 @@ async function pollStatus() {
 
 async function pollLogs() {
   try {
-    const resp = await fetch('/api/logs', { credentials: 'include' });
+    const resp = await fetch(apiUrl('/api/logs'), { credentials: 'include' });
     const data = await resp.json();
     if (data.logs && data.logs.length > 0) {
       for (const entry of data.logs) {
@@ -183,12 +189,12 @@ function stopMotor() {
 
 async function sendMotorCmd(command) {
   try {
-    const payload = { command, speed: motorSpeed, steer_range: motorSteerRange, client_ts: Date.now() / 1000 };
+    const payload = { car: selectedCar, command, speed: motorSpeed, steer_range: motorSteerRange, client_ts: Date.now() / 1000 };
     if (socket && socket.connected) {
       socket.volatile.emit('control:command', payload);
       return;
     }
-    await fetch('/api/command', {
+    await fetch(apiUrl('/api/command'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -204,10 +210,10 @@ async function toggleLights() {
   if (!connected) return;
   lightsOn = !lightsOn;
   try {
-    const resp = await fetch('/api/lights', {
+    const resp = await fetch(apiUrl('/api/lights'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ on: lightsOn }),
+      body: JSON.stringify({ car: selectedCar, on: lightsOn }),
       credentials: 'include',
     });
     const data = await resp.json();
@@ -472,7 +478,7 @@ async function sendRaw() {
     const resp = await fetch('/api/send_raw', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hex, port }),
+      body: JSON.stringify({ car: selectedCar, hex, port }),
       credentials: 'include',
     });
     const data = await resp.json();
@@ -1110,7 +1116,7 @@ async function togglePauseStream() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ paused: adminStreamPaused }),
+      body: JSON.stringify({ car: selectedCar, paused: adminStreamPaused }),
     });
     const data = await resp.json();
     if (data.ok) {
@@ -1132,7 +1138,7 @@ async function toggleSmartMode() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ smart: adminSmartMode }),
+      body: JSON.stringify({ car: selectedCar, smart: adminSmartMode }),
     });
     const data = await resp.json();
     if (data.ok) {
@@ -1442,6 +1448,6 @@ if (isLoggedIn()) {
 }
 }
 addLog('SYS', '🏎️ FPV Debug Cockpit loaded.');
-addLog('SYS', 'Car: WL_FPV_CAR_64886271 / WL_FPV_CAR_99613492 @ 172.16.11.1');
+addLog('SYS', 'Car session: ' + selectedCar + ' @ 172.16.11.1');
 addLog('SYS', 'Codec: H.264 Baseline 640×360 @ 20fps');
 addLog('SYS', 'Motor: Hold WASD/D-pad/gamepad for continuous control (20Hz).');

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Garden FPV Split View</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="split-shell">
+<header>
+  <div class="header-left">
+    <h1>WLTOYS GARDEN <span class="dim">SPLIT VIEW</span></h1>
+  </div>
+  <div class="header-right">
+    <a class="btn btn-small" href="/car/car1" target="_blank">CAR 1</a>
+    <a class="btn btn-small" href="/car/car2" target="_blank">CAR 2</a>
+  </div>
+</header>
+
+<main class="split-main split-frame-main">
+  {% for cid, cfg in cars.items() %}
+  <section class="panel split-frame-panel">
+    <div class="panel-header">
+      <span>{{ cid }} - {{ cfg.label }}</span>
+      <span class="dim">{{ cfg.ssid }}</span>
+    </div>
+    <iframe
+      class="split-dashboard-frame"
+      title="{{ cid }} dashboard"
+      src="/car/{{ cid }}?embed=1"
+      allow="fullscreen; gamepad"
+    ></iframe>
+  </section>
+  {% endfor %}
+</main>
+</body>
+</html>

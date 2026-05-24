@@ -31,9 +31,46 @@ Or run from the project folder:
 The launcher:
 
 - stops any old listener on TCP `5555`
-- tries to connect the TP-Link WiFi adapter to a saved WLtoys car SSID
+- connects the fixed TP-Link WiFi adapters to the saved WLtoys car SSIDs
+- updates `.env.local` with the current per-car bind IPs
 - starts `webapp.py` through the local virtualenv
 - writes logs to `data\server.out.log` and `data\server.err.log`
+
+## Two car setup
+
+The Garden Windows build supports two saved WLtoys car WiFi profiles:
+
+- `car1`: `WL_FPV_CAR_99613492` on Windows interface `WiFi`, local bind IP `172.16.11.3`
+- `car2`: `WL_FPV_CAR_64886271` on Windows interface `WiFi 3`, local bind IP `172.16.11.2`
+
+Run this after both cars are awake:
+
+```powershell
+.\connect-two-cars-wifi.ps1
+.\update-car-bind-ips.ps1
+```
+
+If `car1` connects but Windows shows a `169.254.x.x` address, run this once as Administrator:
+
+```powershell
+.\set-car1-static-ip-admin.ps1
+```
+
+The desktop helper `Prepare Car1 Static IP Admin.bat` opens the required administrator prompt.
+
+Dashboard URLs:
+
+- `http://localhost:5555/car/car1`
+- `http://localhost:5555/car/car2`
+- `http://localhost:5555/admin/cars`
+
+For packet captures or debugging, run this while both car APs are awake:
+
+```powershell
+.\send-car-handshake.ps1
+```
+
+It sends the WLtoys wake/trigger handshake from each connected adapter, which helps keep the cars awake while debugging.
 
 ## Guest drive code
 

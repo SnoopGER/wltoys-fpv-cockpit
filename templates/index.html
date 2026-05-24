@@ -6,7 +6,7 @@
 <title>🏎️ FPV Race Lobby</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body data-user-role="{{ user.role if user else 'guest' }}" data-user-id="{{ user.id if user else '' }}" data-can-connect="{{ 'true' if user and user.can_connect else 'false' }}">
+<body data-user-role="{{ user.role if user else 'guest' }}" data-user-id="{{ user.id if user else '' }}" data-can-connect="{{ 'true' if user and user.can_connect else 'false' }}" data-car-id="{{ car_id }}">
 <!-- ─── HEADER ─────────────────────────────────────────── -->
 <header>
   <div class="header-left">
@@ -43,6 +43,14 @@
     <div class="status-pill" id="statusPill">
       <span class="status-dot" id="statusDot"></span>
       <span id="statusText">DISCONNECTED</span>
+    </div>
+    <div class="car-switcher">
+      {% for cid, cfg in cars.items() %}
+        <a class="{{ 'active' if cid == car_id else '' }}" href="/car/{{ cid }}">{{ cid }}</a>
+      {% endfor %}
+      {% if user and user.role == 'admin' %}
+        <a href="/admin/cars">split</a>
+      {% endif %}
     </div>
     <span class="fps-badge" id="fpsBadge">-- fps</span>
   </div>
@@ -82,8 +90,8 @@
         <button class="btn btn-red connect-allowed" id="btnDisconnect" onclick="doDisconnect()" disabled>■ DISCONNECT</button>
       </div>
       <div class="info-grid">
-        <div class="info-label">Car IP</div><div class="info-value" id="infoCarIp">172.16.11.1</div>
-        <div class="info-label">Port</div><div class="info-value" id="infoPort">1234</div>
+        <div class="info-label">Car</div><div class="info-value" id="infoCarIp">{{ car_config.label }}</div>
+        <div class="info-label">SSID</div><div class="info-value" id="infoPort">{{ car_config.ssid }}</div>
         <div class="info-label">Uptime</div><div class="info-value" id="infoUptime">--</div>
         <div class="info-label">Heartbeats</div><div class="info-value" id="infoHB">0</div>
       </div>

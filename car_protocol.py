@@ -146,9 +146,12 @@ class CarProtocol:
     """Full WLtoys FPV Car protocol handler."""
     
     def __init__(self, car_ip: str = "172.16.11.1", listen_port: int = 1234,
+                 bind_ip: str = "", name: str = "car",
                  on_log: Optional[Callable] = None, on_frame: Optional[Callable] = None):
         self.car_ip = car_ip
         self.listen_port = listen_port
+        self.bind_ip = bind_ip
+        self.name = name
         self.on_log = on_log or (lambda level, msg: None)
         self.on_frame = on_frame or (lambda data: None)
         
@@ -197,7 +200,8 @@ class CarProtocol:
         
         self.state = ConnectionState.CONNECTING
         self._stop_event.clear()
-        self.log("INFO", f"Connecting to car at {self.car_ip}...")
+        bind_label = f" via {self.bind_ip}" if self.bind_ip else ""
+        self.log("INFO", f"Connecting to {self.name} at {self.car_ip}{bind_label}...")
         
         # Check reachability
         import subprocess
@@ -219,26 +223,17 @@ class CarProtocol:
             self.log("WARN", "Ping command not available, trying UDP handshake anyway")
         
         # Send handshake
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            for i in range(3):
-                sock.sendto(HANDSHAKE_WAKE, (self.car_ip, 23459))
-                self.log("TX", f"Handshake wake #{i+1} → {self.car_ip}:23459")
-                time.sleep(0.2)
-                sock.sendto(HANDSHAKE_TRIGGER, (self.car_ip, 23459))
-                self.log("TX", f"Handshake trigger #{i+1} → {self.car_ip}:23459")
-                time.sleep(0.3)
-            sock.close()
-        except Exception as e:
-            self.log("ERROR", f"Handshake failed: {e}")
+        if not self.send_handshake(count=3):
             self.state = ConnectionState.ERROR
             return False
-        
         self.log("OK", "Handshake sent (3x wake + trigger)")
         
         # Start heartbeat thread
         self._hb_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._cmd_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        if self.bind_ip:
+            self._hb_sock.bind((self.bind_ip, 0))
+            self._cmd_sock.bind((self.bind_ip, 0))
         self._hb_thread = threading.Thread(target=self._heartbeat_loop, daemon=True)
         self._hb_thread.start()
         self.log("OK", "Heartbeat thread started (port 23458)")
@@ -248,7 +243,7 @@ class CarProtocol:
             self._recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self._recv_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self._recv_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2 * 1024 * 1024)
-            self._recv_sock.bind(('', self.listen_port))
+            self._recv_sock.bind((self.bind_ip, self.listen_port) if self.bind_ip else ('', self.listen_port))
             self._recv_sock.settimeout(0.5)
         except Exception as e:
             self.log("ERROR", f"Failed to bind port {self.listen_port}: {e}")
@@ -262,6 +257,25 @@ class CarProtocol:
         self.state = ConnectionState.CONNECTED
         self.log("OK", f"Listening for video on port {self.listen_port}")
         return True
+
+    def send_handshake(self, count: int = 3) -> bool:
+        """Send wake/trigger packets without starting a full connection."""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            if self.bind_ip:
+                sock.bind((self.bind_ip, 0))
+            for i in range(count):
+                sock.sendto(HANDSHAKE_WAKE, (self.car_ip, 23459))
+                self.log("TX", f"Handshake wake #{i+1} -> {self.car_ip}:23459")
+                time.sleep(0.2)
+                sock.sendto(HANDSHAKE_TRIGGER, (self.car_ip, 23459))
+                self.log("TX", f"Handshake trigger #{i+1} -> {self.car_ip}:23459")
+                time.sleep(0.3)
+            sock.close()
+            return True
+        except Exception as e:
+            self.log("ERROR", f"Handshake failed: {e}")
+            return False
     
     def disconnect(self):
         """Disconnect from the car."""
@@ -419,6 +433,8 @@ class CarProtocol:
             return {
                 "state": self.state.value,
                 "car_ip": self.car_ip,
+                "bind_ip": self.bind_ip,
+                "name": self.name,
                 "listen_port": self.listen_port,
                 "packets_received": self.stats.packets_received,
                 "frames_assembled": self.stats.frames_assembled,

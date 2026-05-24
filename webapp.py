@@ -65,8 +65,9 @@ socketio = SocketIO(app, async_mode="threading", manage_session=False)
 
 # Global State
 
-car = None
-decoder = None
+DEFAULT_CAR_ID = os.environ.get("DEFAULT_CAR_ID", "car1")
+CAR_CONFIGS = {}
+car_slots = {}
 state_lock = threading.RLock()
 timer_started = False
 
@@ -248,6 +249,26 @@ def env_int(name, default, min_value=None, max_value=None):
     return value
 
 
+CAR_CONFIGS = {
+    "car1": {
+        "id": "car1",
+        "label": os.environ.get("FPV_CAR1_LABEL", "Car 1 / 99613492"),
+        "ssid": os.environ.get("FPV_CAR1_SSID", "WL_FPV_CAR_99613492"),
+        "ip": os.environ.get("FPV_CAR1_IP", os.environ.get("FPV_CAR_IP", "172.16.11.1")),
+        "bind_ip": os.environ.get("FPV_CAR1_BIND_IP", ""),
+        "listen_port": env_int("FPV_CAR1_LISTEN_PORT", int(os.environ.get("FPV_LISTEN_PORT", "1234"))),
+    },
+    "car2": {
+        "id": "car2",
+        "label": os.environ.get("FPV_CAR2_LABEL", "Car 2 / 64886271"),
+        "ssid": os.environ.get("FPV_CAR2_SSID", "WL_FPV_CAR_64886271"),
+        "ip": os.environ.get("FPV_CAR2_IP", "172.16.11.1"),
+        "bind_ip": os.environ.get("FPV_CAR2_BIND_IP", ""),
+        "listen_port": env_int("FPV_CAR2_LISTEN_PORT", 1234),
+    },
+}
+
+
 ADMIN_IDS = csv_ids("ADMIN_DISCORD_IDS")
 ALLOWED_ROLES = csv_role_map("ALLOWED_DISCORD_IDS")
 ALLOWED_IDS = set(ALLOWED_ROLES)
@@ -285,18 +306,41 @@ lobby = {
 }
 
 
-def init_car():
-    global car, decoder
-    if car is None:
+def normalize_car_id(car_id=None):
+    car_id = (car_id or request.args.get("car") or DEFAULT_CAR_ID).strip().lower()
+    return car_id if car_id in CAR_CONFIGS else DEFAULT_CAR_ID
+
+
+def init_car(car_id=None):
+    car_id = normalize_car_id(car_id)
+    slot = car_slots.get(car_id)
+    if slot is None:
+        config = CAR_CONFIGS[car_id]
+        decoder = VideoDecoder(width=640, height=360, quality=75)
         car = CarProtocol(
-            car_ip=os.environ.get("FPV_CAR_IP", "172.16.11.1"),
-            listen_port=int(os.environ.get("FPV_LISTEN_PORT", "1234")),
+            car_ip=config["ip"],
+            listen_port=config["listen_port"],
+            bind_ip=config.get("bind_ip", ""),
+            name=config["label"],
             on_log=lambda level, msg: None,
         )
-    if decoder is None:
-        decoder = VideoDecoder(width=640, height=360, quality=75)
+        car.on_frame = lambda data, d=decoder: d.feed_frame(data)
+        slot = {"car": car, "decoder": decoder, "config": config}
+        car_slots[car_id] = slot
+    return slot
 
-    car.on_frame = lambda data: decoder.feed_frame(data)
+
+def all_car_snapshots():
+    result = []
+    for car_id, config in CAR_CONFIGS.items():
+        slot = init_car(car_id)
+        status = slot["car"].get_status()
+        status["id"] = car_id
+        status["label"] = config["label"]
+        status["ssid"] = config["ssid"]
+        status["decoder_frames"] = slot["decoder"].frame_count
+        result.append(status)
+    return result
 
 
 def current_user():
@@ -535,14 +579,16 @@ def seconds_remaining(now=None):
     return max(0, int(lobby["session_duration"] - elapsed))
 
 
-def car_online():
-    if not car:
+def car_online(car_id=None):
+    slot = car_slots.get(normalize_car_id(car_id))
+    if not slot:
         return False
+    car = slot["car"]
     return car.state in {ConnectionState.CONNECTED, ConnectionState.STREAMING}
 
 
 def lobby_snapshot():
-    init_car()
+    init_car(DEFAULT_CAR_ID)
     with state_lock:
         users = [public_user(u) for u in lobby["users"].values()]
         banned = sorted(lobby.get("banned_ids", set()))
@@ -562,7 +608,8 @@ def lobby_snapshot():
             "connected_spectators": [u for u in users if u and u["role"] == "spectator"],
             "connected_users": users,
             "banned_users": banned,
-            "car_online": car_online(),
+            "car_online": car_online(DEFAULT_CAR_ID),
+            "cars": all_car_snapshots(),
             "max_speed_percent": lobby["max_speed_percent"],
             "session_duration": lobby["session_duration"],
         }
@@ -572,15 +619,18 @@ def broadcast_lobby():
     socketio.emit("lobby:update", lobby_snapshot(), room="lobby")
 
 
-def send_neutral(reason):
-    init_car()
-    try:
-        car.send_command("stop", speed=0, steer_range=0)
-        if hasattr(car, "log"):
-            car.log("SAFETY", f"Neutral stop: {reason}")
-    except Exception as exc:
-        if car and hasattr(car, "log"):
-            car.log("ERROR", f"Neutral stop failed: {exc}")
+def send_neutral(reason, car_id=None):
+    car_ids = [normalize_car_id(car_id)] if car_id else list(CAR_CONFIGS)
+    for cid in car_ids:
+        slot = init_car(cid)
+        car = slot["car"]
+        try:
+            car.send_command("stop", speed=0, steer_range=0)
+            if hasattr(car, "log"):
+                car.log("SAFETY", f"Neutral stop: {reason}")
+        except Exception as exc:
+            if car and hasattr(car, "log"):
+                car.log("ERROR", f"Neutral stop failed: {exc}")
 
 
 def remove_from_queue(user_id):
@@ -728,7 +778,8 @@ def clamp_int(value, default, min_value, max_value):
 
 
 def handle_control_command(user, data):
-    init_car()
+    car_id = normalize_car_id(data.get("car"))
+    slot = init_car(car_id)
     with state_lock:
         cmd = data.get("command", "stop")
         if cmd not in COMMANDS:
@@ -739,8 +790,8 @@ def handle_control_command(user, data):
         steer_range = clamp_int(data.get("steer_range", 100), 100, 0, 100)
         speed = min(speed, max_speed)
 
-    success = car.send_command(cmd, speed=speed, steer_range=steer_range)
-    return {"ok": success, "command": cmd, "speed": speed, "steer_range": steer_range}
+    success = slot["car"].send_command(cmd, speed=speed, steer_range=steer_range)
+    return {"ok": success, "car": car_id, "command": cmd, "speed": speed, "steer_range": steer_range}
 
 
 def local_request():
@@ -760,8 +811,11 @@ def is_mobile():
 
 
 @app.route("/")
-def index():
+@app.route("/car/<car_id>")
+def index(car_id=None):
     user = current_user()
+    car_id = normalize_car_id(car_id)
+    car_config = CAR_CONFIGS[car_id]
     
     # Mobile detection - use mobile template for mobile browsers
     if is_mobile():
@@ -770,6 +824,9 @@ def index():
             user=public_user(user),
             discord_configured=bool(os.environ.get("DISCORD_CLIENT_ID") and os.environ.get("DISCORD_CLIENT_SECRET")),
             is_local=local_request(),
+            car_id=car_id,
+            car_config=car_config,
+            cars=CAR_CONFIGS,
         ))
     else:
         resp = make_response(render_template(
@@ -777,6 +834,9 @@ def index():
             user=public_user(user),
             discord_configured=bool(os.environ.get("DISCORD_CLIENT_ID") and os.environ.get("DISCORD_CLIENT_SECRET")),
             is_local=local_request(),
+            car_id=car_id,
+            car_config=car_config,
+            cars=CAR_CONFIGS,
         ))
     
     # No-cache headers to prevent stale templates
@@ -784,6 +844,19 @@ def index():
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
     return resp
+
+
+@app.route("/admin/cars")
+def admin_cars():
+    user = current_user()
+    if not (is_admin(user) or local_request()):
+        return redirect(url_for("index"))
+    return render_template(
+        "admin_cars.html",
+        user=public_user(user),
+        cars=CAR_CONFIGS,
+        now=int(time.time()),
+    )
 
 
 @app.route("/static/<path:filename>")
@@ -891,6 +964,29 @@ def api_me():
 @app.route("/api/lobby")
 def api_lobby():
     return jsonify(lobby_snapshot())
+
+
+@app.route("/api/cars")
+def api_cars():
+    user, error = require_user()
+    if error:
+        return error
+    return jsonify({"ok": True, "default_car": DEFAULT_CAR_ID, "cars": all_car_snapshots()})
+
+
+@app.route("/api/handshake", methods=["POST"])
+def api_handshake():
+    user, error = require_can_connect()
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    requested = data.get("car") or request.args.get("car") or DEFAULT_CAR_ID
+    car_ids = list(CAR_CONFIGS) if requested == "all" else [normalize_car_id(requested)]
+    results = {}
+    for car_id in car_ids:
+        slot = init_car(car_id)
+        results[car_id] = slot["car"].send_handshake(count=2)
+    return jsonify({"ok": all(results.values()), "results": results})
 
 
 @app.route("/api/queue/join", methods=["POST"])
@@ -1186,12 +1282,15 @@ def api_connect():
     user, error = require_can_connect()
     if error:
         return error
-    init_car()
+    car_id = normalize_car_id(request.args.get("car"))
+    slot = init_car(car_id)
+    car = slot["car"]
+    decoder = slot["decoder"]
     success = car.connect()
     if success:
         decoder.start()
     broadcast_lobby()
-    return jsonify({"ok": success, "state": car.state.value})
+    return jsonify({"ok": success, "car": car_id, "state": car.state.value})
 
 
 @app.route("/api/disconnect", methods=["POST"])
@@ -1199,20 +1298,29 @@ def api_disconnect():
     user, error = require_can_connect()
     if error:
         return error
-    global car, decoder
+    car_id = normalize_car_id(request.args.get("car"))
+    slot = init_car(car_id)
+    car = slot["car"]
+    decoder = slot["decoder"]
     if decoder:
         decoder.stop()
     if car:
         car.disconnect()
     broadcast_lobby()
-    return jsonify({"ok": True, "state": "disconnected"})
+    return jsonify({"ok": True, "car": car_id, "state": "disconnected"})
 
 
 @app.route("/api/status")
 def api_status():
-    init_car()
+    car_id = normalize_car_id(request.args.get("car"))
+    slot = init_car(car_id)
+    car = slot["car"]
+    decoder = slot["decoder"]
     status = car.get_status()
     status["decoder_frames"] = decoder.frame_count if decoder else 0
+    status["car"] = car_id
+    status["label"] = CAR_CONFIGS[car_id]["label"]
+    status["ssid"] = CAR_CONFIGS[car_id]["ssid"]
     return jsonify(status)
 
 
@@ -1221,8 +1329,9 @@ def api_logs():
     user, error = require_user()
     if error:
         return error
-    init_car()
-    logs = car.get_logs()
+    car_id = normalize_car_id(request.args.get("car"))
+    slot = init_car(car_id)
+    logs = slot["car"].get_logs()
     return jsonify({"logs": logs})
 
 
@@ -1231,7 +1340,9 @@ def api_command():
     user, error = require_user()
     if error:
         return error
-    result = handle_control_command(user, request.get_json(silent=True) or {})
+    data = request.get_json(silent=True) or {}
+    data.setdefault("car", request.args.get("car"))
+    result = handle_control_command(user, data)
     status = 200 if result.get("ok") else 403
     return jsonify(result), status
 
@@ -1244,11 +1355,12 @@ def api_lights():
     with state_lock:
         if not validate_control_user(user):
             return jsonify({"ok": False, "error": "not_active_driver"}), 403
-    init_car()
+    car_id = normalize_car_id(request.args.get("car"))
+    slot = init_car(car_id)
     data = request.get_json(silent=True) or {}
     on = bool(data.get("on", True))
-    success = car.toggle_lights(on=on)
-    return jsonify({"ok": success, "lights": on})
+    success = slot["car"].toggle_lights(on=on)
+    return jsonify({"ok": success, "car": car_id, "lights": on})
 
 
 @app.route("/api/send_raw", methods=["POST"])
@@ -1258,8 +1370,10 @@ def api_send_raw():
         return error
     if not local_request():
         return jsonify({"ok": False, "error": "raw_sender_local_only"}), 403
-    init_car()
     data = request.get_json(silent=True) or {}
+    car_id = normalize_car_id(data.get("car") or request.args.get("car"))
+    slot = init_car(car_id)
+    car = slot["car"]
     hex_data = data.get("hex", "")
     port = data.get("port", 23458)
 
@@ -1316,10 +1430,12 @@ def api_stream():
     user, error = require_user()
     if error:
         return error
-    init_car()
+    car_id = normalize_car_id(request.args.get("car"))
+    slot = init_car(car_id)
+    decoder = slot["decoder"]
 
     is_admin = user.get("role") == "admin"
-    sid = request.args.get("sid", str(id(request)))
+    sid = f"{car_id}:{request.args.get('sid', str(id(request)))}"
 
     def generate():
         last_count = -1
@@ -1362,7 +1478,7 @@ def api_stream_pause():
 
     data = request.get_json(silent=True) or {}
     paused = data.get("paused", False)
-    sid = data.get("sid", str(id(request)))
+    sid = f"{normalize_car_id(data.get('car') or request.args.get('car'))}:{data.get('sid', str(id(request)))}"
 
     admin_stream_paused[sid] = paused
     return jsonify({"ok": True, "paused": paused})
@@ -1379,7 +1495,7 @@ def api_stream_smart():
 
     data = request.get_json(silent=True) or {}
     smart = data.get("smart", False)
-    sid = data.get("sid", str(id(request)))
+    sid = f"{normalize_car_id(data.get('car') or request.args.get('car'))}:{data.get('sid', str(id(request)))}"
 
     admin_stream_smart[sid] = smart
     return jsonify({"ok": True, "smart": smart})
@@ -1433,19 +1549,23 @@ def ws_control_command(data):
 
 if __name__ == "__main__":
     ensure_timer()
-    init_car()
+    for configured_car_id in CAR_CONFIGS:
+        init_car(configured_car_id)
     if os.environ.get("AUTO_CONNECT_CAR", "").lower() in {"1", "true", "yes"}:
-        try:
-            success = car.connect()
-            if success:
-                decoder.start()
-                print(f"  Car connected: {car.state.value}")
-            else:
-                print(f"  Car connection failed: {car.state.value}")
-        except Exception as e:
-            print(f"  Car connect error: {e}")
+        for configured_car_id, slot in car_slots.items():
+            try:
+                car = slot["car"]
+                decoder = slot["decoder"]
+                success = car.connect()
+                if success:
+                    decoder.start()
+                    print(f"  {configured_car_id} connected: {car.state.value}")
+                else:
+                    print(f"  {configured_car_id} connection failed: {car.state.value}")
+            except Exception as e:
+                print(f"  {configured_car_id} connect error: {e}")
     print("=" * 60)
     print("  WLtoys FPV Car - Race Lobby Cockpit")
     print("  http://localhost:5555")
     print("=" * 60)
-    socketio.run(app, host="0.0.0.0", port=5555, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host="0.0.0.0", port=env_int("PORT", 5555, 1, 65535), debug=False, allow_unsafe_werkzeug=True)
