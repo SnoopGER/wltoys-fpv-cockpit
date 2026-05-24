@@ -16,10 +16,20 @@ if (-not (Test-Path $EnvFile)) {
 $content = Get-Content -LiteralPath $EnvFile -ErrorAction SilentlyContinue
 
 foreach ($mapping in $Mappings) {
-    $config = Get-NetIPConfiguration -InterfaceAlias $mapping.Interface -ErrorAction SilentlyContinue
+    $adapter = Get-NetAdapter -Name $mapping.Interface -ErrorAction SilentlyContinue
     $expectedIp = $mapping.FallbackIp
-    $assignedIps = @($config.IPv4Address.IPAddress | Where-Object { $_ -like "172.16.11.*" })
-    $ip = $assignedIps | Where-Object { $_ -eq $expectedIp } | Select-Object -First 1
+    if (-not $adapter) {
+        Write-Host "$($mapping.Interface) not found; keeping configured fallback $expectedIp for $($mapping.Key)."
+        $assignedIps = @()
+        $ip = $expectedIp
+    } else {
+        $assignedIps = @(
+            Get-NetIPAddress -InterfaceAlias $mapping.Interface -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                Select-Object -ExpandProperty IPAddress |
+                Where-Object { $_ -like "172.16.11.*" }
+        )
+        $ip = $assignedIps | Where-Object { $_ -eq $expectedIp } | Select-Object -First 1
+    }
     if (-not $ip) {
         $wrongIp = $assignedIps | Select-Object -First 1
         $ip = $expectedIp

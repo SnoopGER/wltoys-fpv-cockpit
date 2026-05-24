@@ -41,7 +41,11 @@ Get-CimInstance Win32_Process |
 
 if (Test-Path $BindIpsScript) {
     Write-Host "Updating per-car bind IPs from the connected WiFi adapters..."
-    & $BindIpsScript
+    try {
+        & $BindIpsScript
+    } catch {
+        Write-Host "Bind IP update failed, continuing with existing .env.local values: $($_.Exception.Message)"
+    }
 }
 
 Write-Host "Starting dashboard..."
