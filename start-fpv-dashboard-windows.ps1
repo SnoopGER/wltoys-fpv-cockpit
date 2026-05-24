@@ -34,6 +34,18 @@ foreach ($listener in $listeners) {
     Stop-Process -Id $listener -Force -ErrorAction SilentlyContinue
 }
 
+Write-Host "Stopping stale dashboard Python processes from this project..."
+$escapedRoot = [Regex]::Escape($Root)
+Get-CimInstance Win32_Process |
+    Where-Object {
+        $_.Name -like "python*" -and
+        $_.CommandLine -match $escapedRoot -and
+        $_.CommandLine -match "webapp.py"
+    } |
+    ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+
 if (Test-Path $ConnectCarsScript) {
     Write-Host "Connecting fixed TP-Link WiFi adapters to both saved WLtoys car profiles..."
     & $ConnectCarsScript
