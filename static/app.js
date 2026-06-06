@@ -13,6 +13,8 @@ let motorSteerRange = 100;  // Steering angle 0-100%
 let lobbyState = null;
 let canControl = true; // Default true; lobby system refines this when socket.io works
 let socket = null;
+let adminSpeedEditing = false;
+let adminDurationEditing = false;
 const userRole = document.body.dataset.userRole || 'guest';
 const userId = document.body.dataset.userId || '';
 const selectedCar = document.body.dataset.carId || 'car1';
@@ -282,11 +284,11 @@ function renderLobby(data) {
   const speedValue = $('adminSpeedValue');
   const duration = $('adminDuration');
   const durationValue = $('adminDurationValue');
-  if (speedLimit && speedValue) {
+  if (speedLimit && speedValue && !adminSpeedEditing) {
     speedLimit.value = data.max_speed_percent;
     speedValue.textContent = data.max_speed_percent + '%';
   }
-  if (duration && durationValue) {
+  if (duration && durationValue && !adminDurationEditing) {
     duration.value = data.session_duration;
     durationValue.textContent = data.session_duration + 's';
   }
@@ -418,12 +420,18 @@ function unbanDiscordIdInput() {
 
 function setAdminSpeed() {
   const input = $('adminSpeedLimit');
-  if (input) adminAction('set_max_speed', { value: parseInt(input.value) });
+  if (input) {
+    adminSpeedEditing = false;
+    adminAction('set_max_speed', { value: parseInt(input.value) });
+  }
 }
 
 function setSessionDuration() {
   const input = $('adminDuration');
-  if (input) adminAction('set_session_duration', { value: parseInt(input.value) });
+  if (input) {
+    adminDurationEditing = false;
+    adminAction('set_session_duration', { value: parseInt(input.value) });
+  }
 }
 
 function updateRoleUi() {
@@ -1168,6 +1176,10 @@ function initSliders() {
   const speedValue = $('speedValue');
   const steerSlider = $('steerSlider');
   const steerValue = $('steerValue');
+  const adminSpeedLimit = $('adminSpeedLimit');
+  const adminSpeedValue = $('adminSpeedValue');
+  const adminDuration = $('adminDuration');
+  const adminDurationValue = $('adminDurationValue');
 
   if (speedSlider) {
     speedSlider.addEventListener('input', () => {
@@ -1179,6 +1191,31 @@ function initSliders() {
     steerSlider.addEventListener('input', () => {
       motorSteerRange = parseInt(steerSlider.value);
       steerValue.textContent = motorSteerRange + '%';
+    });
+  }
+  if (adminSpeedLimit && adminSpeedValue) {
+    const markEditing = () => { adminSpeedEditing = true; };
+    adminSpeedLimit.addEventListener('focus', markEditing);
+    adminSpeedLimit.addEventListener('pointerdown', markEditing);
+    adminSpeedLimit.addEventListener('input', () => {
+      adminSpeedEditing = true;
+      adminSpeedValue.textContent = adminSpeedLimit.value + '%';
+    });
+    adminSpeedLimit.addEventListener('change', setAdminSpeed);
+    adminSpeedLimit.addEventListener('blur', () => {
+      setTimeout(() => { adminSpeedEditing = false; }, 500);
+    });
+  }
+  if (adminDuration && adminDurationValue) {
+    const markEditing = () => { adminDurationEditing = true; };
+    adminDuration.addEventListener('focus', markEditing);
+    adminDuration.addEventListener('input', () => {
+      adminDurationEditing = true;
+      adminDurationValue.textContent = adminDuration.value + 's';
+    });
+    adminDuration.addEventListener('change', setSessionDuration);
+    adminDuration.addEventListener('blur', () => {
+      setTimeout(() => { adminDurationEditing = false; }, 500);
     });
   }
 }
