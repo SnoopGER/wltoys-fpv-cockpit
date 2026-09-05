@@ -30,10 +30,20 @@
 <body>
 <h1>🏎️ GARDEN <span>KART</span> — Design Lab</h1>
 <p class="lead">Three concepts for the V2 cockpit, per the locked hybrid direction:
-<b>serious while driving</b>, party energy everywhere else. Click each card, drive the demo
-(fake telemetry runs live), then tell me which stance wins — or which pieces to merge.</p>
+<b>serious while driving</b>, party energy everywhere else. <b>Decision 2026-09-05:</b>
+Pitlane becomes the lobby side; the two drive views merge into <b>one cockpit with a
+Glass ⇄ Apex density toggle</b> — try it live below, plus the originals for reference.</p>
 
 <div class="grid">
+  <a class="card d" href="cockpit.html" style="grid-column:1/-1;border-color:var(--amber)">
+    <span class="tag" style="background:#3a2c00;color:var(--amber)">★ MERGED CONCEPT — THE LEANING WINNER</span>
+    <h2>Cockpit — Glass ⇄ Apex in one</h2>
+    <p>Same DOM, same data, two densities. <b>Glass</b>: full-bleed video, floating pills,
+    opponent bars, huge speed. <b>Apex</b>: telemetry rail with throttle/steering/governor,
+    race feed, driver queue. Toggle top-right or press <b>H</b> — the choice is remembered per
+    browser, exactly how production will do it (localStorage).</p>
+    <div class="keys">demo: B banana · S red shell · C countdown · N signal-loss · X item · H toggle · E-STOP</div>
+  </a>
   <a class="card a" href="apex.html">
     <span class="tag">CONCEPT A · DRIVE VIEW</span>
     <h2>Apex — instrument panel</h2>

@@ -79,8 +79,8 @@ item layer that changes the race:
 - [ ] Green shell / star / triple shell — later
 
 ## Phase 6 — Frontend: "Garden Kart" cockpit
-- [ ] Design pass `[?]`: mockups first (GPT-image concepts + selection), then implement — NOT before
-- [ ] Stack decision `[?]`: keep vanilla ES-modules (zero build, easy track-PC deploy) vs Vite+TS
+- [~] Design pass: 3 concepts built & browser-QA'd (design/sketches/) → direction picked 2026-09-05 (D13): merged cockpit Glass⇄Apex density toggle + Pitlane lobby; production implementation pending
+- [x] Stack decision `[?]`: keep vanilla ES-modules (zero build, easy track-PC deploy) — decided, D10
 - [ ] Drive view: video fullscreen-first, HUD overlay (speed est., item, latency, lap, position)
 - [ ] Race lobby view, admin race-director console (items, kill switch, driver queue)
 - [ ] Split view for spectators (car1..3 grid)
@@ -110,6 +110,7 @@ item layer that changes the race:
 | 10 | 2026-09-05 | Frontend = **vanilla ES modules + modern CSS** (Riko's call per Snoop) | Prod runs on a Windows PC in a different LAN — zero build step, file copy deploy, no Node on track PC |
 | 11 | 2026-09-05 | ZENGARDEN/ZENADMIN persistent codes **removed**; replace via `PERSISTENT_CODES` env if the track still needs them | Source-visible admin backdoor + public `/api/guest/test` leak; **breaking** if the track relied on those codes — Snoop must re-grant via env or admin panel |
 | 12 | 2026-09-05 | E-STOP semantics: blocks all non-admin control until admin resumes | A driver's 20Hz loop must not override safety (AUDIT §6.2) |
+| 13 | 2026-09-05 | **Frontend direction:** ONE drive cockpit with a **Glass ⇄ Apex density toggle** (persisted per browser), **Pitlane** as lobby/RD-console style; NO three-skin dropdown | Snoop's call after design lab review; maintenance stays one-layout + one party theme |
 
 ## Error / incident log
 | # | Date | What happened | Resolution |
