@@ -1,0 +1,19 @@
+{
+  "name": "Flask app (FPV cockpit — custom recipe)",
+  "kind": "flask",
+  "bootstrap": [
+    "python3 -m venv .venv",
+    ".venv/bin/pip install -r requirements.txt"
+  ],
+  "build": [],
+  "test": [
+    ".venv/bin/python sim/smoke_test.py"
+  ],
+  "start": ".venv/bin/python webapp.py",
+  "port": 5555,
+  "readinessPath": "/",
+  "evidence": [
+    "Entry point is webapp.py (SocketIO on :5555), not flask-run default",
+    "Canonical regression gate is sim/smoke_test.py (protocol sim, 5 checks)"
+  ]
+}
