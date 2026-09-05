@@ -109,3 +109,4 @@ item layer that changes the race:
 1. ~~Design/stack~~ → answered 2026-09-05 (hybrid design, RD console, soft safety, vanilla ES modules)
 2. Track PC specs/Windows version + does it already run cloudflared today? (deploy target = "different PC, different LAN, Windows")
 3. Real-hardware test session slot (needed to validate latency targets)
+4. Discord OAuth app credentials + redirect URIs for the tunnel domain (PUBLIC_BASE_URL suggests `https://race.zen-rc.net`) — needed to test the admin login path at all; plus which of the persistent codes (ZENGARDEN/ZENADMIN) stay active
