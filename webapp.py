@@ -323,6 +323,11 @@ lobby = {
     "banned_ids": load_banned_ids(),
 }
 
+# Phase 4 race engine (server-authoritative, ROADMAP D4-D9). Idle unless an
+# admin starts a race — free-drive behavior is untouched while state == idle.
+from race_engine import RaceEngine  # noqa: E402
+race = RaceEngine(env_int("RACE_GOVERNOR_PERCENT", 80, 5, 100))
+
 
 def normalize_car_id(car_id=None):
     car_id = (car_id or request.args.get("car") or DEFAULT_CAR_ID).strip().lower()
@@ -653,6 +658,7 @@ def lobby_snapshot():
             "cars": all_car_snapshots(),
             "max_speed_percent": lobby["max_speed_percent"],
             "session_duration": lobby["session_duration"],
+            "race": race.snapshot(),
         }
 
 
@@ -822,12 +828,13 @@ def timer_loop():
         # Expire guest sessions
         expire_guest_sessions()
         watchdog_control_silence()
+        race_changed = race.tick()  # countdown -> green
         with state_lock:
             if lobby["active_driver"] and not lobby["paused"]:
                 changed = advance_driver_if_due_locked("driver timer expired")
                 # Broadcast every second while a session is active so clients see the countdown.
                 should_broadcast = True
-        if changed or should_broadcast:
+        if changed or should_broadcast or race_changed:
             broadcast_lobby()
 
 
@@ -919,13 +926,25 @@ def handle_control_command(user, data, rx_ts=None):
         steer_range = clamp_int(data.get("steer_range", 100), 100, 0, 100)
         speed = min(speed, max_speed)
 
+        # Phase 4: server-authoritative race modifiers (governor + items).
+        # Applied AFTER the lobby cap: MAX_REMOTE_SPEED_PERCENT still bounds
+        # everything upstream; boost only releases the RACE governor.
+        race_meta = None
+        if race.active:
+            cmd, speed, steer_range, race_meta = race.modify(
+                user["id"], cmd, speed, steer_range)
+
     success = slot["car"].send_command(cmd, speed=speed, steer_range=steer_range)
     if success:
         # Client-silence watchdog bookkeeping (AUDIT §6.2)
         now = time.time()
         slot["last_control_at"] = now
         note_command_tx(rx_ts, now)
-    return {"ok": success, "car": car_id, "command": cmd, "speed": speed, "steer_range": steer_range}
+    out = {"ok": success, "car": car_id, "command": cmd,
+           "speed": speed, "steer_range": steer_range}
+    if race_meta:
+        out["race"] = race_meta
+    return out
 
 
 def local_request():
@@ -1210,6 +1229,32 @@ def api_admin(action):
             lobby["session_duration"] = clamp_int(data.get("value"), DEFAULT_DRIVE_SECONDS, 15, 3600)
             if lobby["active_driver"]:
                 lobby["driver_started_at"] = time.time()
+        # ---- Phase 4: race-director actions (ROADMAP D8: manual RD control)
+        elif action == "race_start":
+            if not race.start():
+                return jsonify({"ok": False, "error": "race_not_startable"}), 409
+            send_neutral("race countdown — cars held neutral")
+        elif action == "race_green":
+            if not race.green_now():
+                return jsonify({"ok": False, "error": "race_not_in_countdown"}), 409
+        elif action == "race_finish":
+            if not race.finish():
+                return jsonify({"ok": False, "error": "race_not_running"}), 409
+            send_neutral("race finished")
+        elif action == "race_reset":
+            race.reset()
+        elif action == "race_finish_car":
+            target_id = str(data.get("user_id", "")).strip()
+            place = race.register_finish(target_id) if target_id else None
+            if place is None:
+                return jsonify({"ok": False, "error": "finish_not_recorded"}), 400
+        elif action == "item_grant":
+            target_id = str(data.get("user_id", "")).strip()
+            item = str(data.get("item", "")).strip()
+            if not target_id or not race.grant_item(target_id, item):
+                return jsonify({"ok": False, "error": "item_not_granted"}), 400
+        elif action == "item_clear":
+            race.clear_effects(str(data.get("user_id", "")).strip())
         else:
             return jsonify({"ok": False, "error": "unknown_admin_action"}), 404
     broadcast_lobby()

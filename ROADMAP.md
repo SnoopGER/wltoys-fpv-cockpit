@@ -62,18 +62,18 @@ item layer that changes the race:
 - [ ] Per-car video health watchdog + auto-reconnect ("NO SIGNAL" recovery without page reload)
 
 ## Phase 4 — Race engine (server-authoritative)
-- [ ] Race session state machine: lobby → countdown → green → checkered → results
-- [ ] Speed governor in car command layer (default 75–80%, boost → 100%, never > protocol max)
-- [ ] Effect system: timed modifiers on throttle/steer (stackable, priority-safe)
-- [ ] **Safety gates (hard rule):** spin implemented as time-boxed steering lock, never full control inversion at speed; global admin kill switch; per-car disable
+- [~] Race session state machine: idle → countdown (3s, all cars neutral) → green → finished + finish-order bookkeeping — **engine done 2026-09-05** (`race_engine.py`, injected clock, 21 tests); HUD display pending Phase 6
+- [~] Speed governor in car command layer (default 80% via `RACE_GOVERNOR_PERCENT`, boost → 100%, never above `MAX_REMOTE_SPEED_PERCENT` — set that env to 100 at the track if you want full-speed boost)
+- [~] Effect system: timed modifiers on throttle/steer (stackable, priority-safe) — boost/banana/redshell/star server-side; item bag UX pending
+- [x] **Safety gates (hard rule):** red-shell "spin" = 1s ONE-SIDED bounded turn (`forward_right`, never through center, soft-throttled); banana = steer-magnitude limit + slowdown, never inversion; E-STOP still outranks everything (locked by test); global admin kill switch; per-car disable
 - [ ] Persistence: SQLite for races, results, drivers, guest codes (replace scattered JSON files)
 
 ## Phase 5 — Items: Garden Kart, phase 1
 > Cars have NO position telemetry. Virtual positions = race-order bookkeeping,
 > updated by admin as race director (or manual lap marks). `[?]` confirm UX.
-- [ ] 🍄 Boost: unlock 100% throttle for N seconds
-- [ ] 🍌 Banana: place in admin panel → when a car passes the zone `[?]` (manual tap-back initially) → steer-limit + slowdown effect + banana graphic on victim HUD
-- [ ] 🔴 Red shell: admin targets player → victim screen flashes red → impact after delay (distance tiers) → brake/spin effect
+- [~] 🍄 Boost: unlock 100% throttle for N seconds — **server-side done** (`item_grant {user_id, item:"boost"}`), HUD item box pending
+- [~] 🍌 Banana: place in admin panel → when a car passes the zone `[?]` (manual tap-back initially) → steer-limit + slowdown effect + banana graphic on victim HUD — **effect server-side done**; zone-tap UI pending
+- [~] 🔴 Red shell: admin targets player → victim screen flashes red → impact after delay (distance tiers) → brake/spin effect — **impact effect server-side done** (1s one-sided lock); flash/delay UX pending
 - [ ] Item distribution: ranking-based (place → item bag, Mario Kart style)
 - [ ] HUD item UI: item box, use key/button (Xbox: RT+LB or face button `[?]`)
 - [ ] Green shell / star / triple shell — later
@@ -116,6 +116,7 @@ item layer that changes the race:
 |---|------|---------------|------------|
 | 1 | 2026-09-05 | Attempted to delete the AUDIT-flagged "duplicated" `pollGamepad` block in app.js; file broke (`node --check`). Brace analysis showed the AUDIT finding was a **misdiagnosis** — both copies are live (single-device vs combined mode). | Reverted file untouched; AUDIT §6.9 corrected. Lesson: `node --check` + brace analysis BEFORE trusting any "dead code" claim; app.js dedupe deferred to a controller-on hardware session (Phase 3). |
 | 2 | 2026-09-05 | Removing hardcoded ZENGARDEN/ZENADMIN broke 2 old tests that depended on the backdoor | Tests re-seeded via the new `PERSISTENT_CODES`-style fixture (test_lobby_admin) — semantics still covered |
+| 3 | 2026-09-05 | First `race_engine.modify()` treated `steer_range` as a wheel POSITION (center=50) — wrong: **it is a deflection magnitude; direction lives in `command`** (see `car_protocol.send_command`). Caught by own tests before touching hardware. | Reworked: banana clamps magnitude, red-shell pins `command` to a bounded one-sided turn. Protocol fact recorded here |
 
 ## Open questions for Snoop
 1. ~~Design/stack~~ → answered 2026-09-05 (hybrid design, RD console, soft safety, vanilla ES modules)
