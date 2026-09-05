@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garden Kart · Concept C “Pitlane” — lobby & race-director console</title>
+<style>
+  /* ── Concept C: PITLANE ──────────────────────────────────
+     Stance: the PARTY side of the hybrid. This is the lobby +
+     race-director console drivers see between sessions. Chunky,
+     playful, Mario-Kart energy — driving itself stays in A/B. */
+  :root{
+    --sky1:#2b1055; --sky2:#7597de; --grass:#2f9e44; --grass2:#1c6b2f;
+    --card:#ffffff; --ink:#1c1533; --dim:#7c7496;
+    --red:#ff4d5e; --yellow:#ffd23f; --green:#35e0a1; --blue:#4dabf7; --purple:#9775fa;
+    --font:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+    --mono:"Cascadia Code","Consolas",ui-monospace,monospace;
+    --shadow:0 10px 0 rgba(0,0,0,.18);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);color:var(--ink);min-height:100vh;overflow-x:hidden;
+       background:linear-gradient(var(--sky1),var(--sky2) 55%,var(--grass) 55.2%,var(--grass2))}
+  .road{position:fixed;left:0;right:0;bottom:0;height:18vh;
+        background:repeating-linear-gradient(90deg,#3d4451 0 90px,#454d5c 90px 180px);
+        border-top:6px dashed #fff3}
+
+  header{text-align:center;padding:34px 16px 8px;position:relative}
+  h1{font-size:clamp(34px,6vw,64px);font-weight:900;letter-spacing:-.02em;color:#fff;
+     text-shadow:0 4px 0 #00000033, 0 10px 30px rgba(0,0,0,.35)}
+  h1 em{font-style:normal;color:var(--yellow)}
+  .sub{color:#ffffffcc;margin-top:6px;letter-spacing:.3em;font-size:12px;text-transform:uppercase}
+  .cloud{position:absolute;background:#fff;border-radius:99px;opacity:.85;animation:drift linear infinite}
+  @keyframes drift{from{transform:translateX(-15vw)}to{transform:translateX(115vw)}}
+
+  main{display:grid;grid-template-columns:1fr 380px;gap:22px;max-width:1180px;
+       margin:26px auto 60px;padding:0 22px;position:relative}
+
+  .panel{background:var(--card);border-radius:22px;box-shadow:var(--shadow);padding:20px}
+  .panel h2{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);
+            margin-bottom:14px}
+
+  /* drivers */
+  .drivers{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:14px}
+  .driver{border-radius:16px;padding:14px;display:flex;gap:12px;align-items:center;
+          border:3px solid transparent;background:#f6f4ff;transition:.15s;cursor:pointer}
+  .driver:hover{transform:translateY(-2px)}
+  .driver.sel{border-color:var(--green);background:#eafff5}
+  .driver.wait{border-color:var(--yellow);background:#fffbe8}
+  .face{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;font-size:24px;
+        box-shadow:inset 0 -6px 0 rgba(0,0,0,.12)}
+  .driver .nm{font-weight:800}
+  .driver .st{font-size:11px;color:var(--dim);font-family:var(--mono)}
+  .carpick{margin-left:auto;display:flex;flex-direction:column;gap:3px}
+  .carpick b{font-size:11px;font-family:var(--mono);color:var(--dim)}
+
+  /* RD console */
+  .rd .zone{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+  .rd .zonehit{border-radius:12px;background:#f1eefe;padding:10px;text-align:center;cursor:grab;
+               border:2px dashed #d4ccee;font-size:11px;color:var(--dim)}
+  .rd .zonehit:hover{border-color:var(--purple)}
+  .rd .zonehit.armed{border-style:solid;border-color:var(--purple);background:#f3ecff}
+  .rd .zonehit .z{font-weight:800;color:var(--ink);font-size:13px}
+  .items{display:flex;gap:10px;flex-wrap:wrap}
+  .gitem{width:64px;height:64px;border-radius:16px;display:grid;place-items:center;font-size:30px;
+         background:#f6f4ff;cursor:grab;transition:.15s;position:relative}
+  .gitem:hover{transform:scale(1.08) rotate(-3deg)}
+  .gitem small{position:absolute;bottom:3px;font-size:8px;font-family:var(--mono);color:var(--dim)}
+  .rdrow{display:flex;gap:10px;margin-top:16px}
+  .btn{flex:1;border:none;border-radius:14px;padding:14px;font-weight:900;font-size:14px;
+       letter-spacing:.06em;cursor:pointer;box-shadow:0 6px 0 rgba(0,0,0,.2);transition:.1s}
+  .btn:active{transform:translateY(4px);box-shadow:0 2px 0 rgba(0,0,0,.2)}
+  .btn.go{background:var(--green)} .btn.warn{background:var(--yellow)} .btn.stop{background:var(--red);color:#fff}
+
+  /* standings */
+  .stand li{list-style:none;display:flex;align-items:center;gap:12px;padding:10px 8px;
+            border-bottom:2px solid #f0edfa;font-weight:600}
+  .medal{font-size:22px}
+  .stand .t{margin-left:auto;font-family:var(--mono);font-size:12px;color:var(--dim)}
+  .badge{display:inline-block;font-size:10px;font-weight:800;padding:3px 10px;border-radius:99px;
+         letter-spacing:.1em}
+  .b-green{background:#d3f9e8;color:#087f5b}.b-yellow{background:#fff9db;color:#a08300}
+  .b-red{background:#ffe3e6;color:#c92a3a}
+
+  /* item fly-across animation layer */
+  #fly{position:fixed;inset:0;pointer-events:none;z-index:50}
+  #fly span{position:absolute;font-size:44px;animation:fly 1.2s ease-in forwards}
+  @keyframes fly{from{transform:translate(0,0) rotate(0)}to{transform:translate(60vw,-30vh) rotate(360deg);opacity:0}}
+
+  @media (max-width:900px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="road"></div>
+<div class="cloud" style="top:8%;width:120px;height:36px;animation-duration:60s"></div>
+<div class="cloud" style="top:18%;width:80px;height:26px;animation-duration:85s;animation-delay:-30s"></div>
+
+<header>
+  <h1>GARDEN <em>KART</em></h1>
+  <div class="sub">Karben GP · Saturday Night Cup · Race 2 of 5</div>
+</header>
+
+<main>
+  <div>
+    <section class="panel">
+      <h2>Drivers <span class="badge b-green" style="margin-left:8px">3 JOINED</span></h2>
+      <div class="drivers" id="drivers">
+        <div class="driver sel"><div class="face" style="background:#ffe3e6">🦊</div>
+          <div><div class="nm">Snoop</div><div class="st">driving · lap 3/10</div></div>
+          <div class="carpick"><b>CAR 1</b><span style="font-size:11px">amber</span></div></div>
+        <div class="driver wait"><div class="face" style="background:#e5dbff">🐰</div>
+          <div><div class="nm">Bunny</div><div class="st">in queue · P2</div></div>
+          <div class="carpick"><b>queue</b></div></div>
+        <div class="driver"><div class="face" style="background:#d3f9d8">🦉</div>
+          <div><div class="nm">Max</div><div class="st">finished · P1</div></div>
+          <div class="carpick"><b>done</b></div></div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:22px">
+      <h2>Standings · Night Cup</h2>
+      <ol class="stand">
+        <li><span class="medal">🥇</span> Max <span class="t">2:11.4 · fastest 24.8</span></li>
+        <li><span class="medal">🥈</span> Snoop <span class="t">2:14.9</span></li>
+        <li><span class="medal">🥉</span> Bunny <span class="t">2:21.2 · 2× 🍌</span></li>
+      </ol>
+    </section>
+  </div>
+
+  <aside class="panel rd">
+    <h2>Race Director <span class="badge b-yellow" style="margin-left:8px">ADMIN</span></h2>
+    <div class="zone">
+      <div class="zonehit" data-z="1"><div class="z">Z1 · hairpin</div>tap when hit</div>
+      <div class="zonehit armed" data-z="2"><div class="z">Z2 · chicane</div>🍌 armed</div>
+      <div class="zonehit" data-z="3"><div class="z">Z3 · start</div>tap when hit</div>
+    </div>
+    <h2>Item bag — drag onto a driver</h2>
+    <div class="items">
+      <div class="gitem" draggable="true" data-i="🍄">🍄<small>boost</small></div>
+      <div class="gitem" draggable="true" data-i="🍌">🍌<small>banana</small></div>
+      <div class="gitem" draggable="true" data-i="🔴">🔴<small>red shell</small></div>
+      <div class="gitem" draggable="true" data-i="🟢">🟢<small>green shell</small></div>
+      <div class="gitem" draggable="true" data-i="⭐">⭐<small>star</small></div>
+    </div>
+    <div class="rdrow">
+      <button class="btn go" id="green">GREEN FLAG</button>
+      <button class="btn stop" id="estop">E-STOP</button>
+    </div>
+    <div class="rdrow">
+      <button class="btn warn" id="slow">SAFETY: SLOW 60%</button>
+    </div>
+  </aside>
+</main>
+
+<div id="fly"></div>
+
+<script>
+const $=s=>document.querySelector(s);
+document.querySelectorAll('.driver').forEach(d=>d.onclick=()=>{
+  document.querySelectorAll('.driver').forEach(x=>x.classList.remove('sel'));
+  d.classList.add('sel');});
+document.querySelectorAll('.zonehit').forEach(z=>z.onclick=()=>{
+  z.classList.toggle('armed');
+  z.innerHTML=z.classList.contains('armed')
+    ? `<div class="z">${z.querySelector('.z').textContent}</div>🍌 armed`
+    : `${z.dataset.zname||'tap when hit'}`;
+  if(!z.classList.contains('armed')) z.innerHTML=`<div class="z">${['Z1 · hairpin','Z2 · chicane','Z3 · start'][z.dataset.z-1]}</div>tap when hit`;
+});
+// drag item onto driver -> effect fly-across
+document.querySelectorAll('.gitem').forEach(g=>{
+  g.addEventListener('dragstart',e=>e.dataTransfer.setData('text/plain',g.dataset.i));
+  g.addEventListener('click',()=>fire(g.dataset.i,$('.driver.sel')));
+});
+document.querySelectorAll('.driver').forEach(d=>{
+  d.addEventListener('dragover',e=>e.preventDefault());
+  d.addEventListener('drop',e=>{e.preventDefault();fire(e.dataTransfer.getData('text/plain'),d);});
+});
+function fire(i,d){
+  const s=document.createElement('span');s.textContent=i;
+  const r=d.getBoundingClientRect();s.style.left=r.left+'px';s.style.top=r.top+'px';
+  $('#fly').append(s);setTimeout(()=>s.remove(),1200);
+  const st=d.querySelector('.st');st.textContent='🍄 boost!'==='x'?st.textContent:
+    i==='🍌'?'BANANA! steer limit 3s':i==='🔴'?'RED SHELL incoming':i==='🍄'?'BOOST 100%':'item used';
+  setTimeout(()=>st.textContent='in queue · P2',3000);
+}
+$('#green').onclick=()=>{document.querySelector('header .sub').textContent='GREEN FLAG — GO GO GO';
+  document.querySelectorAll('.driver').forEach(d=>d.classList.remove('wait'));};
+$('#estop').onclick=()=>{const b=$('#estop');b.textContent=b.textContent==='E-STOP'?'▶ RESUME RACE':'E-STOP';
+  document.querySelector('header .sub').textContent=b.textContent==='E-STOP'?'E-STOP ENGAGED':'race paused';};
+</script>
+</body>
+</html>

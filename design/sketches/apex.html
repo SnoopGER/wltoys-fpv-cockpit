@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garden Kart · Concept A “Apex” — sim rail</title>
+<style>
+  /* ── Concept A: APEX ─────────────────────────────────────
+     Stance: serious instrument panel while driving.
+     Video is an inset; data density wins. Race-day dusk palette. */
+  :root{
+    --bg:#07090c; --panel:#0e1319; --panel2:#131a22; --line:#1f2a36;
+    --fg:#dbe6f0; --dim:#5c7186; --accent:#ffb300;      /* kart amber */
+    --good:#2ee66b; --warn:#ffcc00; --bad:#ff3b4e;
+    --telemetry:#59d8ff;
+    --font:"Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+    --mono:"Cascadia Code","Consolas",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:13px;
+       display:grid;grid-template-rows:auto 1fr auto;overflow:hidden}
+
+  header{display:flex;align-items:center;gap:14px;padding:8px 16px;
+         background:var(--panel);border-bottom:1px solid var(--line)}
+  .logo{font-weight:800;letter-spacing:.14em;color:var(--accent);font-size:14px}
+  .logo span{color:var(--dim);font-weight:400}
+  .chip{font-family:var(--mono);font-size:11px;padding:3px 10px;border-radius:99px;
+        border:1px solid var(--line);color:var(--dim)}
+  .chip b{color:var(--fg)}
+  #lat{margin-left:auto}
+  #lat.good{color:var(--good);border-color:#1c4a2c}
+  .esp{background:var(--bad);color:#fff;border:none;font-weight:800;letter-spacing:.1em;
+       padding:6px 16px;border-radius:6px;cursor:pointer}
+  .esp.armed{animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.55}}
+
+  main{display:grid;grid-template-columns:1fr 340px;gap:10px;padding:10px;min-height:0}
+
+  /* video stage */
+  .stage{position:relative;border:1px solid var(--line);border-radius:10px;overflow:hidden;
+         background:
+           radial-gradient(120% 90% at 50% 110%, #1c2a1a 0%, transparent 55%),
+           linear-gradient(#0c1116 60%, #16210f 61%, #101a0c 100%)}
+  .stage .scan{position:absolute;inset:0;background:
+      repeating-linear-gradient(0deg,transparent 0 3px,rgba(255,255,255,.012) 3px 4px)}
+  .crosshair{position:absolute;left:50%;top:52%;width:46px;height:46px;transform:translate(-50%,-50%);
+      border:1px solid rgba(255,255,255,.25);border-radius:50%}
+  .crosshair::before,.crosshair::after{content:"";position:absolute;background:rgba(255,255,255,.35)}
+  .crosshair::before{left:50%;top:-14px;width:1px;height:74px}
+  .crosshair::after{top:50%;left:-14px;height:1px;width:74px}
+  .osd{position:absolute;font-family:var(--mono);font-size:11px;color:rgba(219,230,240,.75);
+       text-shadow:0 1px 2px #000}
+  .osd.tl{top:10px;left:12px} .osd.tr{top:10px;right:12px;text-align:right}
+  .rec{color:var(--bad)} .rec::before{content:"●";margin-right:5px;animation:pulse 1.4s infinite}
+  .nosig{position:absolute;inset:0;display:none;place-items:center;background:#000d;
+         font-family:var(--mono);letter-spacing:.3em;color:var(--bad)}
+
+  /* speed gauge bottom-left of video */
+  .spd{position:absolute;left:16px;bottom:14px;display:flex;align-items:baseline;gap:6px}
+  .spd .n{font-family:var(--mono);font-size:56px;font-weight:700;color:#fff;line-height:1;
+          text-shadow:0 2px 10px rgba(0,0,0,.8)}
+  .spd .u{color:var(--dim);font-family:var(--mono)}
+
+  /* right rail */
+  aside{display:grid;grid-template-rows:auto auto 1fr auto;gap:10px;min-height:0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+  .card h3{font-size:10px;letter-spacing:.18em;color:var(--dim);margin-bottom:8px}
+  .pos{display:flex;align-items:baseline;gap:8px}
+  .pos .p{font-family:var(--mono);font-size:38px;font-weight:800;color:var(--accent)}
+  .pos .of{color:var(--dim);font-family:var(--mono)}
+  .kv{display:grid;grid-template-columns:1fr auto;row-gap:6px;font-family:var(--mono);font-size:12px}
+  .kv .k{color:var(--dim)}
+  .bars{display:flex;flex-direction:column;gap:8px}
+  .bar label{display:flex;justify-content:space-between;font-size:10px;
+             letter-spacing:.12em;color:var(--dim);margin-bottom:3px}
+  .bar .track{height:8px;border-radius:4px;background:#0a0f14;border:1px solid var(--line);overflow:hidden}
+  .bar .fill{height:100%;border-radius:4px}
+  .thr .fill{width:62%;background:linear-gradient(90deg,var(--good),#aef26a)}
+  .strk .fill{width:50%;background:linear-gradient(90deg,#2a3947,var(--telemetry))}
+  .gov .fill{width:80%;background:var(--accent)}
+
+  .feed{min-height:0;overflow:auto}
+  .feed li{list-style:none;display:flex;gap:8px;padding:5px 0;border-bottom:1px dashed #16202b;
+           font-size:12px}
+  .feed time{color:var(--dim);font-family:var(--mono);flex:none}
+  .feed .sys{color:var(--telemetry)} .feed .hit{color:var(--bad)} .feed .race{color:var(--accent)}
+
+  /* driver queue */
+  .queue{display:flex;gap:6px;flex-wrap:wrap}
+  .avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;
+          font-weight:700;font-size:12px;background:#1a2634;border:1px solid var(--line)}
+  .avatar.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(255,179,0,.25)}
+
+  footer{display:flex;gap:10px;align-items:center;padding:8px 16px;background:var(--panel);
+         border-top:1px solid var(--line)}
+  .item{width:58px;height:58px;border-radius:10px;background:var(--panel2);border:1px solid var(--line);
+        display:grid;place-items:center;font-size:30px;cursor:pointer;transition:transform .15s}
+  .item.rolling{animation:roll .4s steps(6) 1}
+  @keyframes roll{from{transform:rotateX(0)}to{transform:rotateX(360deg)}}
+  .hint{color:var(--dim);font-family:var(--mono);font-size:11px}
+  .laps{margin-left:auto;font-family:var(--mono);color:var(--dim)}
+  .laps b{color:var(--fg)}
+  .keys{display:flex;gap:4px}
+  .key{font-family:var(--mono);font-size:10px;border:1px solid var(--line);border-radius:4px;
+       padding:2px 6px;color:var(--dim);background:var(--panel2)}
+
+  /* banana effect demo */
+  body.banana .stage{filter:hue-rotate(-25deg) saturate(.6)}
+  body.banana{outline:3px solid var(--bad)}
+  #toasts{position:fixed;left:50%;top:64px;transform:translateX(-50%);display:flex;
+          flex-direction:column;gap:6px;align-items:center;z-index:50}
+  .toast{background:#000c;border:1px solid var(--line);border-radius:8px;padding:8px 18px;
+         font-family:var(--mono);letter-spacing:.12em;animation:fade 2.4s forwards}
+  .toast.bad{border-color:var(--bad);color:var(--bad)}
+  .toast.good{border-color:var(--good);color:var(--good)}
+  @keyframes fade{0%{opacity:0;transform:translateY(-8px)}12%{opacity:1;transform:none}
+                  80%{opacity:1}100%{opacity:0}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">GARDEN<span>//</span>KART</div>
+  <div class="chip">CAR <b>1</b> · KARBEN TRACK</div>
+  <div class="chip">DRIVER <b id="drv">SNOOP</b></div>
+  <button class="esp" id="esp">E-STOP</button>
+  <div class="chip good" id="lat">RTT <b>46</b>ms</div>
+</header>
+
+<main>
+  <section class="stage">
+    <div class="scan"></div>
+    <div class="crosshair"></div>
+    <div class="osd tl rec">CAM1 · 640×360 · H.264</div>
+    <div class="osd tr">BAT <b>11.4V</b> · LINK 92%</div>
+    <div class="spd"><span class="n" id="spd">62</span><span class="u">km/h</span></div>
+    <div class="nosig" id="nosig">NO&nbsp;SIGNAL</div>
+  </section>
+
+  <aside>
+    <div class="card pos">
+      <span class="p" id="place">P2</span><span class="of">/ 3 CARS</span>
+      <span style="margin-left:auto;font-family:var(--mono);color:var(--dim)" id="clock">RACE 02:14</span>
+    </div>
+
+    <div class="card bars">
+      <div class="bar thr"><label><span>THROTTLE</span><span id="thrt">62%</span></label>
+        <div class="track"><div class="fill" id="thrf"></div></div></div>
+      <div class="bar strk"><label><span>STEERING</span><span>C 12° R</span></label>
+        <div class="track"><div class="fill"></div></div></div>
+      <div class="bar gov"><label><span>GOVERNOR</span><span>80% MAX</span></label>
+        <div class="track"><div class="fill"></div></div></div>
+    </div>
+
+    <div class="card feed">
+      <h3>RACE FEED</h3>
+      <ul id="feed">
+        <li><time>19:04</time><span class="race">GREEN — race started</span></li>
+        <li><time>19:05</time><span>Snoop passes Bunny, turn 3</span></li>
+        <li><time>19:06</time><span class="sys">RD placed banana · zone 2</span></li>
+        <li><time>19:06</time><span class="hit">BUNNY hit banana — steer limit 3s</span></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h3>DRIVER QUEUE</h3>
+      <div class="queue">
+        <div class="avatar active" title="Snoop (driving)">SN</div>
+        <div class="avatar" title="Bunny">BU</div>
+        <div class="avatar" title="Max">MA</div>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <div class="item" id="itembox" title="Press X / click to use">🍄</div>
+  <div>
+    <div class="hint">ITEM — click or <span class="key">X</span> to use</div>
+    <div class="hint" style="margin-top:4px">
+      <span class="key">↑↓←→</span> drive &nbsp;
+      <span class="key">SPACE</span> brake &nbsp;
+      <span class="key">B</span> demo banana
+    </div>
+  </div>
+  <div class="laps">LAP <b id="lap">3</b>/10 · BEST <b>0:24.8</b></div>
+</footer>
+
+<div id="toasts"></div>
+
+<script>
+  // fake telemetry loop
+  const $=s=>document.querySelector(s);
+  let v=62;
+  setInterval(()=>{
+    v=Math.max(0,Math.min(97,v+(Math.random()*7-3.2)));
+    $('#spd').textContent=Math.round(v);
+    $('#thrt').textContent=Math.round(v)+'%';
+    $('#thrf').style.width=v+'%';
+  },350);
+  let ms=46;
+  setInterval(()=>{ ms=Math.max(18,ms+Math.round(Math.random()*16-8));
+    const el=$('#lat'); el.innerHTML='RTT <b>'+ms+'</b>ms';
+    el.className=ms<80?'good':(ms<200?'':'bad');
+    el.style.borderColor=ms<80?'#1c4a2c':(ms<200?'#4a441c':'#4a1c22');
+    el.style.color=ms<80?'var(--good)':(ms<200?'var(--warn)':'var(--bad)');
+  },900);
+  function toast(t,cls){const d=document.createElement('div');d.className='toast '+(cls||'');
+    d.textContent=t;$('#toasts').append(d);setTimeout(()=>d.remove(),2400);}
+  $('#itembox').onclick=()=>{const it=$('#itembox');it.classList.remove('rolling');void it.offsetWidth;
+    it.classList.add('rolling');toast('BOOST ENGAGED — 100% UNLOCKED','good');
+    document.querySelector('.gov .fill').style.width='100%';
+    document.querySelector('.gov label span:last-child').textContent='BOOST 100%';};
+  addEventListener('keydown',e=>{
+    if(e.key==='b'||e.key==='B'){document.body.classList.add('banana');
+      toast('🍌 BANANA! STEER LIMIT 3s','bad');setTimeout(()=>document.body.classList.remove('banana'),3000);}
+    if(e.key==='x'||e.key==='X')$('#itembox').click();});
+  $('#esp').onclick=()=>{const b=$('#esp');b.classList.toggle('armed');
+    toast(b.classList.contains('armed')?'E-STOP ENGAGED':'E-STOP released',
+          b.classList.contains('armed')?'bad':'good');};
+  // video blip demo: press N
+  addEventListener('keydown',e=>{if(e.key==='n'||e.key==='N')
+    $('#nosig').style.display='grid';});
+</script>
+</body>
+</html>

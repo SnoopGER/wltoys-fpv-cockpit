@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garden Kart · Concept B “Glass” — video-first HUD</title>
+<style>
+  /* ── Concept B: GLASS ────────────────────────────────────
+     Stance: the FPV feed IS the interface. Full-bleed video,
+     everything else is frosted glass floating on top. Minimal ink. */
+  :root{
+    --fg:#f2f6fa; --dim:rgba(242,246,250,.55);
+    --glass:rgba(10,14,20,.42); --line:rgba(255,255,255,.14);
+    --accent:#35e0a1; --bad:#ff4d5e; --warn:#ffd23f;
+    --font:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+    --mono:"Cascadia Code","Consolas",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:var(--font);color:var(--fg);overflow:hidden;
+       background:
+         radial-gradient(140% 100% at 50% 115%, #234017 0%, transparent 60%),
+         radial-gradient(90% 60% at 80% -10%, #1b2c3a 0%, transparent 55%),
+         linear-gradient(#10161c 55%, #1d2b16 56%, #131d0e 100%)}
+  .grain{position:fixed;inset:0;pointer-events:none;opacity:.5;
+    background:repeating-linear-gradient(0deg,transparent 0 3px,rgba(255,255,255,.015) 3px 4px)}
+
+  .glass{background:var(--glass);border:1px solid var(--line);border-radius:16px;
+         backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px)}
+
+  /* top bar: one slim glass strip */
+  .top{position:fixed;top:14px;left:50%;transform:translateX(-50%);
+       display:flex;gap:4px;align-items:center;padding:6px;border-radius:99px;z-index:10}
+  .top .seg{padding:6px 16px;border-radius:99px;font-size:12px;letter-spacing:.06em;color:var(--dim);
+            cursor:pointer;transition:.15s;white-space:nowrap}
+  .top .seg.on{background:rgba(255,255,255,.12);color:var(--fg)}
+  .top .seg b{font-family:var(--mono);color:var(--fg)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);
+       box-shadow:0 0 8px var(--accent);margin:0 10px 0 6px}
+
+  /* speed: giant, bottom-right, no chrome at all */
+  .speed{position:fixed;right:34px;bottom:18px;text-align:right;pointer-events:none;z-index:5}
+  .speed .num{font-family:var(--mono);font-weight:800;font-size:110px;line-height:.85;
+    color:#fff;text-shadow:0 4px 30px rgba(0,0,0,.65)}
+  .speed .unit{font-size:13px;color:var(--dim);letter-spacing:.35em}
+
+  /* left column: lap / position / throttle, each its own pill */
+  .left{position:fixed;left:20px;top:84px;bottom:20px;display:flex;flex-direction:column;
+        gap:12px;width:212px;z-index:10}
+  .pill{padding:14px 16px}
+  .pill .lbl{font-size:9px;letter-spacing:.22em;color:var(--dim);margin-bottom:6px}
+  .pill .big{font-family:var(--mono);font-size:30px;font-weight:700}
+  .pill .big small{font-size:14px;color:var(--dim);font-weight:400}
+  .throttle{height:10px;border-radius:5px;background:rgba(255,255,255,.1);overflow:hidden;margin-top:8px}
+  .throttle i{display:block;height:100%;width:62%;border-radius:5px;
+              background:linear-gradient(90deg,var(--accent),#b6f5a2);transition:width .3s}
+  .govtag{font-family:var(--mono);font-size:10px;color:var(--warn);margin-top:6px}
+
+  /* item: bottom-center stage */
+  .item{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:10;
+        width:96px;height:96px;border-radius:24px;display:grid;place-items:center;font-size:46px;
+        cursor:pointer;transition:transform .15s}
+  .item:hover{transform:translateX(-50%) scale(1.06)}
+  .item .use{position:absolute;bottom:-10px;left:50%;transform:translateX(-50%);
+    font-family:var(--mono);font-size:10px;letter-spacing:.15em;padding:3px 10px;
+    border-radius:99px;background:#000c;border:1px solid var(--line);color:var(--dim)}
+
+  /* right rail: opponents as minimal bars */
+  .right{position:fixed;right:20px;top:84px;width:230px;display:flex;flex-direction:column;
+         gap:10px;z-index:10}
+  .opp{padding:10px 14px;display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center}
+  .opp .rank{font-family:var(--mono);font-weight:800;font-size:18px;color:var(--dim)}
+  .opp.me .rank{color:var(--accent)}
+  .opp .who{font-size:13px}
+  .opp .gap{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .opp.me{outline:1px solid rgba(53,224,161,.5)}
+
+  /* e-stop: discreet but reachable */
+  .esp{position:fixed;top:14px;right:16px;z-index:20;padding:10px 18px;border-radius:99px;
+       background:rgba(255,77,94,.16);border:1px solid rgba(255,77,94,.6);color:#ffb3ba;
+       font-weight:700;letter-spacing:.12em;font-size:12px;cursor:pointer;backdrop-filter:blur(10px)}
+  .esp:hover{background:rgba(255,77,94,.35)}
+
+  /* countdown overlay */
+  .count{position:fixed;inset:0;display:none;place-items:center;z-index:30;background:rgba(0,0,0,.35)}
+  .count .n{font-family:var(--mono);font-size:180px;font-weight:800;text-shadow:0 0 60px #000}
+  /* item-hit flash */
+  .flash{position:fixed;inset:0;pointer-events:none;z-index:25;opacity:0}
+  .flash.banana{background:radial-gradient(60% 60% at 50% 100%,rgba(255,210,63,.35),transparent)}
+  .flash.shell{background:radial-gradient(80% 80% at 50% 50%,rgba(255,77,94,.5),transparent)}
+  .flash.go{animation:fl 1.6s}
+  @keyframes fl{0%,100%{opacity:0}20%{opacity:1}70%{opacity:.8}}
+
+  .hint{position:fixed;left:20px;bottom:20px;font-family:var(--mono);font-size:11px;
+        color:var(--dim);z-index:10}
+  .hint b{color:var(--fg);background:rgba(255,255,255,.08);padding:2px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="grain"></div>
+
+<nav class="top glass">
+  <span class="dot"></span>
+  <span class="seg on">CAR 1</span>
+  <span class="seg">CAR 2</span>
+  <span class="seg">CAR 3</span>
+  <span class="seg" style="border-left:1px solid var(--line);border-radius:0">GRID VIEW</span>
+  <span class="seg" id="lat">RTT <b>42</b>ms</span>
+</nav>
+
+<button class="esp" id="esp">■ E-STOP</button>
+
+<section class="left">
+  <div class="pill glass">
+    <div class="lbl">POSITION</div>
+    <div class="big">P<small> </small><span id="place">2</span><small> / 3</small></div>
+  </div>
+  <div class="pill glass">
+    <div class="lbl">LAP</div>
+    <div class="big"><span id="lap">3</span><small> / 10</small></div>
+  </div>
+  <div class="pill glass">
+    <div class="lbl">THROTTLE</div>
+    <div class="throttle"><i id="thr"></i></div>
+    <div class="govtag" id="gov">GOVERNOR 80%</div>
+  </div>
+</section>
+
+<section class="right" id="opp">
+  <div class="opp glass"><span class="rank">1</span><span class="who">Max</span><span class="gap">+1.2s</span></div>
+  <div class="opp glass me"><span class="rank">2</span><span class="who">Snoop · you</span><span class="gap">—</span></div>
+  <div class="opp glass"><span class="rank">3</span><span class="who">Bunny</span><span class="gap">−0.8s</span></div>
+</section>
+
+<div class="speed"><div class="num" id="spd">62</div><div class="unit">KM/H</div></div>
+
+<div class="item glass" id="item" title="click or X">🍄<span class="use">X</span></div>
+
+<div class="count" id="count"><div class="n">3</div></div>
+<div class="flash" id="flash"></div>
+
+<div class="hint"><b>B</b> banana &nbsp; <b>S</b> red shell &nbsp; <b>C</b> countdown &nbsp; <b>X</b> use item</div>
+
+<script>
+const $=s=>document.querySelector(s);
+let v=62;
+setInterval(()=>{v=Math.max(0,Math.min(97,v+(Math.random()*7-3.2)));
+  $('#spd').textContent=Math.round(v);$('#thr').style.width=v+'%';},300);
+setInterval(()=>{$('#lat').innerHTML='RTT <b>'+(38+Math.round(Math.random()*10))+'</b>ms';},1100);
+
+const flash=k=>{const f=$('#flash');f.className='flash '+k;void f.offsetWidth;f.classList.add('go');};
+$('#item').onclick=()=>{$('#gov').textContent='BOOST! 100% UNLOCKED';$('#gov').style.color='var(--accent)';
+  flash('banana');setTimeout(()=>{$('#gov').textContent='GOVERNOR 80%';$('#gov').style.color='';},4000);};
+addEventListener('keydown',e=>{
+  const k=e.key.toLowerCase();
+  if(k==='x')$('#item').click();
+  if(k==='b'){flash('banana');}
+  if(k==='s'){flash('shell');}
+  if(k==='c'){const c=$('#count');let n=3;c.style.display='grid';c.querySelector('.n').textContent=n;
+    const t=setInterval(()=>{n--;if(n<=0){clearInterval(t);c.style.display='none';}
+      else c.querySelector('.n').textContent=n;},900);}
+});
+$('#esp').onclick=()=>$('#esp').textContent=$('#esp').textContent.includes('■')?'▶ RESUME':'■ E-STOP';
+</script>
+</body>
+</html>

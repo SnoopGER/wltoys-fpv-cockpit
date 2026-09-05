@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Garden Kart — Design Lab</title>
+<style>
+  :root{--bg:#0a0d12;--card:#121821;--line:#22303f;--fg:#dbe6f0;--dim:#61788e;
+        --amber:#ffb300;--mint:#35e0a1;--grape:#9775fa;
+        --font:"Segoe UI",system-ui,sans-serif;--mono:"Cascadia Code",Consolas,monospace}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font-family:var(--font);padding:40px 24px;max-width:1100px;margin:auto}
+  h1{font-size:26px;font-weight:800}
+  h1 span{color:var(--amber)}
+  .lead{color:var(--dim);margin:8px 0 30px;max-width:70ch;line-height:1.6}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px}
+  a.card{display:block;background:var(--card);border:1px solid var(--line);border-radius:14px;
+     padding:22px;text-decoration:none;color:inherit;transition:.15s}
+  a.card:hover{transform:translateY(-3px);border-color:var(--fg)}
+  .tag{font-family:var(--mono);font-size:10px;letter-spacing:.2em;padding:3px 10px;border-radius:99px}
+  .a .tag{background:#3a2c00;color:var(--amber)} .b .tag{background:#00332a;color:var(--mint)}
+  .c .tag{background:#2b2140;color:var(--grape)}
+  h2{margin:12px 0 6px;font-size:19px}
+  p{color:var(--dim);font-size:13px;line-height:1.55}
+  .keys{margin-top:12px;font-family:var(--mono);font-size:11px;color:#8aa2b8}
+  footer{margin-top:34px;color:var(--dim);font-size:12px;line-height:1.7;border-top:1px solid var(--line);padding-top:16px}
+  code{font-family:var(--mono);background:#1a2430;padding:1px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+<h1>🏎️ GARDEN <span>KART</span> — Design Lab</h1>
+<p class="lead">Three concepts for the V2 cockpit, per the locked hybrid direction:
+<b>serious while driving</b>, party energy everywhere else. Click each card, drive the demo
+(fake telemetry runs live), then tell me which stance wins — or which pieces to merge.</p>
+
+<div class="grid">
+  <a class="card a" href="apex.html">
+    <span class="tag">CONCEPT A · DRIVE VIEW</span>
+    <h2>Apex — instrument panel</h2>
+    <p>Dense sim cockpit. Video as an inset, telemetry rail on the right (throttle, steering,
+    governor, position, race feed, driver queue). Reads like an FPV goggles OSD. Best when you
+    want lap times and car health visible without looking away from the track.</p>
+    <div class="keys">demo: B banana · X item · N signal-loss · E-STOP top bar</div>
+  </a>
+  <a class="card b" href="glass.html">
+    <span class="tag">CONCEPT B · DRIVE VIEW</span>
+    <h2>Glass — video is the interface</h2>
+    <p>Full-bleed FPV feed, everything else frosted-glass and minimal: slim top strip, one huge
+    speed number, floating item box, opponent bars. Least ink on screen, most track. Closest to
+    a modern racing-game HUD.</p>
+    <div class="keys">demo: B banana · S red shell · C countdown · X item</div>
+  </a>
+  <a class="card c" href="pitlane.html">
+    <span class="tag">CONCEPT C · LOBBY + RD</span>
+    <h2>Pitlane — the party side</h2>
+    <p>The Mario-Kart half of the hybrid: driver lobby, night-cup standings, and the race-director
+    console — drag items onto drivers, arm banana zones, green flag, safety mode. This is what
+    guests see between sessions.</p>
+    <div class="keys">demo: drag/click items onto drivers · zone arm toggle · flags</div>
+  </a>
+</div>
+
+<footer>
+  Throwaway concepts — no production code touched. Branch <code>v2-modern-cockpit</code>,
+  folder <code>design/sketches/</code>. All three are plain HTML/CSS/JS, zero build, matching the
+  vanilla-ES-modules decision (#10). Pick a winner, a mix, or ask for a round 2.
+</footer>
+</body>
+</html>
