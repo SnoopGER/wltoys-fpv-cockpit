@@ -38,8 +38,10 @@ item layer that changes the race:
 - [x] Regression suite `test_control_auth.py` — 10 tests lock all of the above (22/22 total unit tests green, sim smoke 5/5, `hermes verify` green)
 - [ ] Discord OAuth = admins (`ADMIN_DISCORD_IDS`) + race friends (role allowlist) — works, needs live creds (open Q4)
 - [ ] Guest one-time codes stay; add generate/revoke UI polish in admin panel
-- [ ] Session hardening: uniform auth middleware, rate limiting on redeem/login, CSRF posture review
-- [ ] `/api/lobby` anonymous leak (banned IDs + usernames) → require auth (next increment)
+- [x] Session hardening: rate limits on redeem + OAuth callback (sliding window), plaintext-credential debug log deleted, `init_car` double-init race fixed (AUDIT §6.5/6.7)
+- [x] `/api/lobby` anonymous leak (banned IDs + usernames) → now requires login
+- [ ] CSRF posture review (SameSite=Lax only today)
+- [ ] `/api/status` still anonymous (car IP/stats) → fold into auth sweep next
 - [ ] Lock remaining control API behind role checks / input validation sweep
 - [ ] Bans/kick preserved from lobby branch ✓ (verified by tests)
 

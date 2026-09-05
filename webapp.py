@@ -126,10 +126,7 @@ _load_guest_codes()
 
 # Active guest sessions: {guest_user_id: {"code": str, "expires_at": time}}
 active_guest_sessions = {}
-REDEEM_DEBUG_LOG = Path(os.environ.get(
-    "REDEEM_DEBUG_LOG",
-    Path(__file__).parent / "data" / "redeem-debug.log",
-))
+# (redeem debug log removed — it wrote plaintext codes + IP + UA to disk, AUDIT §6.3)
 
 DISCORD_API = "https://discord.com/api"
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "https://race.zen-rc.net").rstrip("/")
@@ -326,22 +323,29 @@ def normalize_car_id(car_id=None):
     return car_id if car_id in CAR_CONFIGS else DEFAULT_CAR_ID
 
 
+_init_car_lock = threading.RLock()
+
+
 def init_car(car_id=None):
     car_id = normalize_car_id(car_id)
     slot = car_slots.get(car_id)
     if slot is None:
-        config = CAR_CONFIGS[car_id]
-        decoder = VideoDecoder(width=640, height=360, quality=75)
-        car = CarProtocol(
-            car_ip=config["ip"],
-            listen_port=config["listen_port"],
-            bind_ip=config.get("bind_ip", ""),
-            name=config["label"],
-            on_log=lambda level, msg: None,
-        )
-        car.on_frame = lambda data, d=decoder: d.feed_frame(data)
-        slot = {"car": car, "decoder": decoder, "config": config}
-        car_slots[car_id] = slot
+        with _init_car_lock:  # AUDIT §6.7: two racing first-requests must not
+            slot = car_slots.get(car_id)  # build two CarProtocols / double-bind UDP
+            if slot is None:
+                config = CAR_CONFIGS[car_id]
+                decoder = VideoDecoder(width=640, height=360, quality=75)
+                car = CarProtocol(
+                    car_ip=config["ip"],
+                    listen_port=config["listen_port"],
+                    bind_ip=config.get("bind_ip", ""),
+                    name=config["label"],
+                    on_log=lambda level, msg: None,
+                )
+                car.on_frame = lambda data, d=decoder: d.feed_frame(data)
+                slot = {"car": car, "decoder": decoder, "config": config,
+                        "last_control_at": None}
+                car_slots[car_id] = slot
     return slot
 
 
@@ -959,6 +963,8 @@ def discord_callback():
 
     expected_state = session.pop("discord_oauth_state", None)
     received_state = request.args.get("state")
+    if rate_limited(f"oauth:{request.remote_addr}", limit=10, window=60):
+        return "Too many login attempts. Wait a minute.", 429
     if not expected_state or not received_state or not secrets.compare_digest(expected_state, received_state):
         session.pop("discord_oauth_redirect_uri", None)
         return "Invalid Discord OAuth state.", 400
@@ -1025,6 +1031,10 @@ def api_me():
 
 @app.route("/api/lobby")
 def api_lobby():
+    # AUDIT §6.3: anonymous snapshot leaked usernames + banned IDs
+    user, error = require_user()
+    if error:
+        return error
     return jsonify(lobby_snapshot())
 
 
@@ -1204,32 +1214,41 @@ def api_guest_clear():
     return jsonify({"ok": True, "removed": removed})
 
 
+_rate_lock = threading.Lock()
+_rate_events = {}
+
+
+def rate_limited(key, limit=10, window=60.0):
+    """Sliding-window limiter (per key). AUDIT §6.5: redeem/login had none."""
+    now = time.time()
+    with _rate_lock:
+        hits = [t for t in _rate_events.get(key, ()) if now - t < window]
+        if len(hits) >= limit:
+            _rate_events[key] = hits
+            return True
+        hits.append(now)
+        _rate_events[key] = hits
+        if len(_rate_events) > 4096:  # keep the table bounded
+            for k in [k for k, v in _rate_events.items()
+                      if not v or now - v[-1] >= window]:
+                del _rate_events[k]
+    return False
+
+
 @app.route("/api/redeem-code", methods=["POST"])
 def api_redeem_code():
     """Guest: redeem a drive code to get driver access."""
-    import datetime
+    if rate_limited(f"redeem:{request.remote_addr}", limit=10, window=60):
+        return jsonify({"ok": False, "error": "too_many_attempts"}), 429
     data = request.get_json(silent=True) or {}
     code = data.get("code", "").strip()
-    src = request.remote_addr
-    ua = request.headers.get("User-Agent", "")[:60]
-    REDEEM_DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(REDEEM_DEBUG_LOG, "a") as _f:
-        _f.write(f"{datetime.datetime.now()} REDEEM from={src} raw_code={code!r} content_type={request.content_type} ua={ua}\n")
     if not code:
-        with open(REDEEM_DEBUG_LOG, "a") as _f:
-            _f.write(f"  -> REJECTED: no_code_provided, data={data!r}\n")
         return jsonify({"ok": False, "error": "no_code_provided"}), 400
     user, error = redeem_guest_code(code)
     if error:
-        with guest_codes_lock:
-            known = list(guest_codes.keys())
-        with open(REDEEM_DEBUG_LOG, "a") as _f:
-            _f.write(f"  -> FAILED: error={error!r} known_codes_count={len(known)}\n")
         return jsonify({"ok": False, "error": error}), 403
     session["user"] = user
     session["is_guest"] = True
-    with open(REDEEM_DEBUG_LOG, "a") as _f:
-        _f.write(f"  -> OK: guest_id={user['id']}\n")
     return jsonify({"ok": True, "user": public_user(user), "expires_at": user["guest_expires_at"]})
 
 
