@@ -19,6 +19,9 @@ import requests
 from flask import Flask, Response, jsonify, make_response, redirect, render_template, request, send_from_directory, session, url_for
 from flask.sessions import SecureCookieSessionInterface
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_sock import Sock
+
+from video_relay import RawFrameRelay
 
 # Add current directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -63,6 +66,7 @@ class HostAwareSessionInterface(SecureCookieSessionInterface):
 
 app.session_interface = HostAwareSessionInterface()
 socketio = SocketIO(app, async_mode="threading", manage_session=False)
+sock = Sock(app)  # raw H.264 -> WebCodecs relay (Phase 3)
 
 # Global State
 
@@ -337,6 +341,7 @@ def init_car(car_id=None):
             if slot is None:
                 config = CAR_CONFIGS[car_id]
                 decoder = VideoDecoder(width=640, height=360, quality=75)
+                relay = RawFrameRelay()
                 car = CarProtocol(
                     car_ip=config["ip"],
                     listen_port=config["listen_port"],
@@ -344,9 +349,9 @@ def init_car(car_id=None):
                     name=config["label"],
                     on_log=lambda level, msg: None,
                 )
-                car.on_frame = lambda data, d=decoder: d.feed_frame(data)
+                car.on_frame = lambda data, d=decoder, r=relay: (d.feed_frame(data), r.feed(data))
                 slot = {"car": car, "decoder": decoder, "config": config,
-                        "last_control_at": None}
+                        "relay": relay, "last_control_at": None}
                 car_slots[car_id] = slot
     return slot
 
@@ -1590,6 +1595,94 @@ def api_protocol():
 # Admin stream state (per-session, not global)
 admin_stream_paused = {}  # sid -> bool
 admin_stream_smart = {}   # sid -> bool
+
+
+def _video_token_signer():
+    return SecureCookieSessionInterface().get_signing_serializer(app)
+
+
+def video_token_for(user_id, car_id):
+    return _video_token_signer().dumps(
+        {"vid_uid": user_id, "vid_car": car_id, "vid_iat": time.time()})
+
+
+def video_token_verify(token):
+    try:
+        data = _video_token_signer().loads(token)
+    except Exception:
+        return None
+    if not data or "vid_uid" not in data:
+        return None
+    if time.time() - float(data.get("vid_iat", 0)) > 3600:
+        return None
+    return data
+
+
+@app.route("/api/video-token")
+def api_video_token():
+    """Short-lived signed token for the WebCodecs relay websocket.
+
+    The browser cannot attach cookies reliably to WS on every platform and
+    a fresh per-connection token avoids long-lived credentials in URLs.
+    """
+    user, error = require_user()
+    if error:
+        return error
+    car_id = normalize_car_id(request.args.get("car"))
+    slot = init_car(car_id)
+    return jsonify({
+        "ok": True,
+        "token": video_token_for(user["id"], car_id),
+        "codec": slot["relay"].codec,          # None until first frame seen
+        "relay_frames": slot["relay"].frames_relayed,
+    })
+
+
+@sock.route("/ws/video/<car_id>")
+def ws_video(ws, car_id):
+    """Raw Annex-B H.264 -> browser WebCodecs. Auth = signed video token."""
+    car_id = normalize_car_id(car_id)
+    data = video_token_verify(request.args.get("token", ""))
+    if not data:
+        ws.send("fpv-auth-error")
+        ws.close()
+        return
+    uid = data["vid_uid"]
+    if data.get("vid_car") != car_id or is_banned_user(uid):
+        ws.send("fpv-auth-error")
+        ws.close()
+        return
+    guest_info = active_guest_sessions.get(uid)
+    if guest_info is None and not uid.startswith("guest-"):
+        if not is_allowed_user(uid):
+            ws.send("fpv-auth-error")
+            ws.close()
+            return
+    slot = init_car(car_id)
+    relay = slot["relay"]
+    sub = relay.subscribe()
+    last_auth_check = time.time()
+    try:
+        ws.send(b"fpv-meta:" + json.dumps(
+            {"codec": relay.codec or "h264", "car": car_id}).encode())
+        while True:
+            try:
+                frame = relay.poll(sub, timeout=0.5)
+            except Exception:
+                frame = None  # poll timeout
+            if frame is not None:
+                ws.send(frame)  # bytes -> binary frame (flask-sock auto-detects)
+            if time.time() - last_auth_check > 5:
+                last_auth_check = time.time()
+                revoked = is_banned_user(uid) or (
+                    guest_info is not None and time.time() > guest_info["expires_at"])
+                if revoked:
+                    ws.send("fpv-auth-revoked")
+                    break
+    except Exception:
+        pass  # client disconnect
+    finally:
+        relay.unsubscribe(sub)
 
 
 @app.route("/api/stream")

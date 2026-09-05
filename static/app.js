@@ -23,6 +23,8 @@ const carQuery = '?car=' + encodeURIComponent(selectedCar);
 function apiUrl(path) {
   return path + (path.includes('?') ? '&' : '?') + 'car=' + encodeURIComponent(selectedCar);
 }
+window.fpvApiUrl = apiUrl;          // used by video.js (WebCodecs path)
+window.setStreaming = (v) => { streaming = !!v; };
 
 // ── DOM Refs ─────────────────────────────────────────────
 const $ = id => document.getElementById(id);
