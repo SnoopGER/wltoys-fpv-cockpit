@@ -156,7 +156,7 @@ def main():
         import websocket  # websocket-client
         vid = s1.get(BASE + "/api/video-token?car=car1").json()
         check("video-token issued", vid.get("ok") and bool(vid.get("token")))
-        wsurl = "ws://127.0.0.1:5560/ws/video/car1?token=" + vid["token"]
+        wsurl = WS_BASE + "/ws/video/car1?token=" + vid["token"]
         wsc = websocket.create_connection(wsurl, timeout=10)
         first = wsc.recv()  # meta frame (text)
         check("relay meta frame", isinstance(first, (str, bytes)) and
@@ -174,7 +174,7 @@ def main():
         # forged token rejected
         try:
             wsb = websocket.create_connection(
-                "ws://127.0.0.1:5560/ws/video/car1?token=garbage", timeout=5)
+                WS_BASE + "/ws/video/car1?token=garbage", timeout=5)
             resp = wsb.recv()
             wsb.close()
         except Exception as exc:
