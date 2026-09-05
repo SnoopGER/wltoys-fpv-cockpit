@@ -54,9 +54,9 @@ item layer that changes the race:
 - [x] Latency measurement hooks: `control:rtt` clock-sync ping, per-command `server_ts`/`echo_ts` in ack, server rolling input→RX and RX→UDP-TX stats in `/api/status` (`control_latency_*`, `control_tx_*`), cockpit latency badge (green <80ms / yellow <200ms / red)
 
 ## Phase 3 — Video pipeline (latency is the game)
-- [ ] Send raw H.264 over WebSocket to browser; **WebCodecs `VideoDecoder`** render (Chrome/Edge/Safari 17+)
-- [ ] Fallback ladder: WebCodecs → MSE → existing MJPEG (never a dead screen)
-- [ ] Drop server-side JPEG re-encode from the hot path (keeps CPU for race engine)
+- [~] Send raw H.264 over WebSocket to browser; **WebCodecs `VideoDecoder`** render (Chrome/Edge/Safari 17+) — **backend + client built & sim-E2E green 2026-09-05** (commit 7d0896d: `/ws/video/<car>` + signed tokens + `static/video.js`); real-browser tunnel test pending
+- [~] Fallback ladder: WebCodecs → MSE → existing MJPEG (never a dead screen) — WebCodecs→MJPEG ladder implemented in video.js; MSE rung not needed yet
+- [~] Drop server-side JPEG re-encode from the hot path — MJPEG decoder now runs only when a `/api/stream` viewer is attached `[needs verify at track]`
 - [ ] HEVC path decision `[?]` (browser support is weak — likely transcode or force H.264 per car)
 - [ ] Target: <150 ms glass-to-glass over tunnel `[?]` (needs real track measurement)
 - [ ] Per-car video health watchdog + auto-reconnect ("NO SIGNAL" recovery without page reload)
