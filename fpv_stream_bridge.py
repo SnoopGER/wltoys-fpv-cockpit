@@ -29,7 +29,9 @@ started_at = time.time()
 
 def build_parser():
     parser = argparse.ArgumentParser(description="WLtoys FPV MJPEG stream bridge for VLC/OBS")
-    parser.add_argument("--host", default=os.environ.get("STREAM_BRIDGE_HOST", "0.0.0.0"))
+    # AUDIT §6.3: default to loopback — expose deliberately via
+    # STREAM_BRIDGE_HOST=0.0.0.0 (or --host) when the LAN should watch.
+    parser.add_argument("--host", default=os.environ.get("STREAM_BRIDGE_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("STREAM_BRIDGE_PORT", "8080")))
     parser.add_argument("--car-ip", default=os.environ.get("STREAM_BRIDGE_CAR_IP", os.environ.get("FPV_CAR_IP", "172.16.11.1")))
     parser.add_argument("--bind-ip", default=os.environ.get("STREAM_BRIDGE_BIND_IP", ""))

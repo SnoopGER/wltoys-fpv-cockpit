@@ -494,7 +494,11 @@ def redeem_guest_code(code):
 
 
 def expire_guest_sessions():
-    """Check and expire guest sessions. Called from timer_loop."""
+    """Check and expire guest sessions. Called from timer_loop.
+
+    kick_user mutates lobby — must hold state_lock (AUDIT §6.7);
+    state_lock is an RLock, no deadlock with deeper lock usage.
+    """
     now = time.time()
     expired = []
     with guest_codes_lock:
@@ -503,7 +507,8 @@ def expire_guest_sessions():
                 expired.append(guest_id)
                 del active_guest_sessions[guest_id]
     for guest_id in expired:
-        kick_user(guest_id, "Drive code expired")
+        with state_lock:
+            kick_user(guest_id, "Drive code expired")
 
 
 def get_active_codes():
@@ -1397,6 +1402,10 @@ def api_disconnect():
 
 @app.route("/api/status")
 def api_status():
+    # AUDIT §6.3: anonymous status leaked car IP, SSID, traffic stats
+    user, error = require_user()
+    if error:
+        return error
     car_id = normalize_car_id(request.args.get("car"))
     slot = init_car(car_id)
     car = slot["car"]

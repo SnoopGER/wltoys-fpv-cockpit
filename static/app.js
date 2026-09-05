@@ -121,6 +121,7 @@ function stopPolling() {
 async function pollStatus() {
   try {
     const resp = await fetch(apiUrl('/api/status'), { credentials: 'include' });
+    if (!resp.ok) return; // 401 anonymous / 429 — skip this tick quietly
     const s = await resp.json();
 
     connected = ['connected', 'streaming'].includes(s.state);

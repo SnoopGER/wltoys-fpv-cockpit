@@ -179,7 +179,7 @@ Line 1158: `not e["active"] or time.time() > e["expires_at"] and not e.get("pers
 - Committed junk: `webapp.py.bak`, `static/app.js.bak`, `CAR.pcap`, `webapp.py.bak` at repo root.
 - `/admin/cars` grants access to any **local** request without login (webapp.py:877) — a local process or SSRF via 127.0.0.1 reaches the admin split view.
 - UA-sniffing for the mobile template (webapp.py:828-835).
-- app.js: dead duplicate of the entire "Apply input or stop" block in `pollGamepad` — lines 800-846 and again 848-890 execute back-to-back every 50 ms poll (mismatched `end switch` comments at 845-846 confirm copy-paste).
+- app.js `pollGamepad`: **CORRECTED 2026-09-05 (was misdiagnosed as removable duplication)** — the first "Apply input or stop" copy (800-844) is NOT dead: brace analysis shows it is the open of the single-device `else` branch, and the second copy (848-890) is the only apply path for `_combined` mode. Both execute; removing either breaks a mode. Net effect today: single-device input is applied twice per 50ms poll (benign only because `startMotor` dedupes). Refactor ONLY with a controller-on hardware test — do not blind-delete.
 - mobile.js hardwires no `car` field → mobile always talks to `DEFAULT_CAR_ID` (mobile.js:121-128 + normalize at webapp.py:328-330); mobile users are invisible to the lobby (no socket).
 - MJPEG generator duplicated between webapp.py:1467-1488 and fpv_stream_bridge.py:75-87; both poll with 5 ms sleeps instead of event signalling.
 - `filterMap` typo: `'ERROR'/'ERR' → 'logFilterError'` but the DOM id is `logFilterErr` (app.js:1051 vs index.html:265) — the ERROR filter checkbox doesn't gate at add-time (works only via `filterLogs`, app.js:1088-1098).

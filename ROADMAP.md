@@ -40,8 +40,10 @@ item layer that changes the race:
 - [ ] Guest one-time codes stay; add generate/revoke UI polish in admin panel
 - [x] Session hardening: rate limits on redeem + OAuth callback (sliding window), plaintext-credential debug log deleted, `init_car` double-init race fixed (AUDIT §6.5/6.7)
 - [x] `/api/lobby` anonymous leak (banned IDs + usernames) → now requires login
-- [ ] CSRF posture review (SameSite=Lax only today)
-- [ ] `/api/status` still anonymous (car IP/stats) → fold into auth sweep next
+- [x] CSRF posture review (SameSite=Lax only today)
+- [x] `/api/status` now requires login (was anonymous car IP/SSID/stats)
+- [x] Stream bridge default now `127.0.0.1` (was 0.0.0.0 no-auth LAN exposure); opt back in via `STREAM_BRIDGE_HOST=0.0.0.0`
+- [x] Lock discipline: guest-expiry kick path now holds `state_lock` (AUDIT §6.7)
 - [ ] Lock remaining control API behind role checks / input validation sweep
 - [ ] Bans/kick preserved from lobby branch ✓ (verified by tests)
 
@@ -112,7 +114,8 @@ item layer that changes the race:
 ## Error / incident log
 | # | Date | What happened | Resolution |
 |---|------|---------------|------------|
-| — | — | (empty so far) | — |
+| 1 | 2026-09-05 | Attempted to delete the AUDIT-flagged "duplicated" `pollGamepad` block in app.js; file broke (`node --check`). Brace analysis showed the AUDIT finding was a **misdiagnosis** — both copies are live (single-device vs combined mode). | Reverted file untouched; AUDIT §6.9 corrected. Lesson: `node --check` + brace analysis BEFORE trusting any "dead code" claim; app.js dedupe deferred to a controller-on hardware session (Phase 3). |
+| 2 | 2026-09-05 | Removing hardcoded ZENGARDEN/ZENADMIN broke 2 old tests that depended on the backdoor | Tests re-seeded via the new `PERSISTENT_CODES`-style fixture (test_lobby_admin) — semantics still covered |
 
 ## Open questions for Snoop
 1. ~~Design/stack~~ → answered 2026-09-05 (hybrid design, RD console, soft safety, vanilla ES modules)
