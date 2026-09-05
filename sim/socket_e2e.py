@@ -1,7 +1,8 @@
 """E2E test of the Socket.IO control plane + latency telemetry against car_sim.
 
-Starts webapp.py on PORT from .env.local (expects 5560), redeems a guest
-code over HTTP, drives the socket as an authenticated session, and asserts:
+Starts webapp.py on its effective PORT (webapp reads .env.local; default 5555),
+redeems a guest code over HTTP, drives the socket as an authenticated session,
+and asserts:
   1. control:command over socket returns ok ack (car connected via sim)
   2. control:ack carries server_ts + echo_ts (latency loop fields)
   3. control:rtt round-trip works (clock sync fields)
@@ -19,9 +20,14 @@ import urllib.error
 
 import requests
 import socketio
+from dotenv import dotenv_values
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BASE = "http://127.0.0.1:5560"
+# same precedence as webapp.py: real env wins, then .env.local, then 5555
+PORT = os.environ.get("PORT") or dotenv_values(
+    os.path.join(HERE, ".env.local")).get("PORT") or "5555"
+BASE = f"http://127.0.0.1:{PORT}"
+WS_BASE = f"ws://127.0.0.1:{PORT}"
 
 results = []
 def check(name, ok, extra=""):
