@@ -81,9 +81,9 @@ item layer that changes the race:
 ## Phase 6 — Frontend: "Garden Kart" cockpit
 - [~] Design pass: 3 concepts built & browser-QA'd (design/sketches/) → direction picked 2026-09-05 (D13): merged cockpit Glass⇄Apex density toggle + Pitlane lobby; production implementation pending
 - [x] Stack decision `[?]`: keep vanilla ES-modules (zero build, easy track-PC deploy) — decided, D10
-- [ ] Drive view: video fullscreen-first, HUD overlay (speed est., item, latency, lap, position)
-- [ ] Race lobby view, admin race-director console (items, kill switch, driver queue)
-- [ ] Split view for spectators (car1..3 grid)
+- [~] Drive view: video fullscreen-first, HUD overlay (speed est., item, latency, lap, position) — concept done (cockpit.html, Glass⇄Apex) incl. car selector (CAR 1-3); production pending
+- [~] Race lobby view, admin race-director console (items, kill switch, driver queue) — concept done (pitlane.html); production pending
+- [~] Split view for spectators (car1..3 grid) — concept done as GRID view in cockpit.html (works in both densities, tile click-through); production pending
 - [ ] Mobile guest view polish
 - [ ] Reconnect/offline UX everywhere (tunnel blips must not kill a race)
 

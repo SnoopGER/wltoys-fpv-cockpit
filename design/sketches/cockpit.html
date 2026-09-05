@@ -81,6 +81,34 @@
   body.mode-glass .spd .n{font-size:96px}
   .spd .u{color:var(--dim);font-family:var(--mono)}
 
+  /* ══ grid view (spectate all cars) ═════════════════════ */
+  .gridview{display:none;grid-template-columns:repeat(3,1fr);gap:12px;min-height:0}
+  body.view-grid .gridview{display:grid}
+  body.view-grid .stage{display:none}
+  .tile{position:relative;border:1px solid var(--line-hard);border-radius:12px;overflow:hidden;
+        cursor:pointer;transition:transform .15s,border-color .15s;
+        background:
+          radial-gradient(120% 90% at 50% 115%, #1c2a1a 0%, transparent 55%),
+          linear-gradient(#0c1116 60%, #16210f 61%, #101a0c 100%)}
+  .tile:hover{transform:translateY(-3px);border-color:var(--amber)}
+  .tile .cam{position:absolute;top:10px;left:12px;font-family:var(--mono);font-size:11px;
+             color:rgba(230,238,246,.75);text-shadow:0 1px 2px #000}
+  .tile .st{position:absolute;top:10px;right:12px;font-family:var(--mono);font-size:9px;
+            letter-spacing:.15em;padding:3px 8px;border-radius:99px}
+  .st.live{background:rgba(53,224,161,.15);color:var(--mint);border:1px solid rgba(53,224,161,.4)}
+  .st.off{background:rgba(255,59,78,.15);color:var(--bad);border:1px solid rgba(255,59,78,.4)}
+  .st.idle{background:rgba(255,210,63,.12);color:var(--warn);border:1px solid rgba(255,210,63,.35)}
+  .tile .info{position:absolute;left:12px;bottom:10px;font-family:var(--mono);font-size:11px;color:var(--fg)}
+  .tile .info small{color:var(--dim)}
+  .tile .tspeed{position:absolute;right:12px;bottom:8px;font-family:var(--mono);
+                font-size:26px;font-weight:800;text-shadow:0 2px 8px #000}
+  .tile .tspeed small{font-size:10px;color:var(--dim);font-weight:400}
+  .tile.nosig{display:grid;place-items:center;background:#05070a}
+  .tile.nosig .msg{font-family:var(--mono);letter-spacing:.3em;color:var(--bad);font-size:12px}
+  .gridhint{position:absolute;top:52px;left:50%;transform:translateX(-50%);z-index:30;
+            font-family:var(--mono);font-size:10px;color:var(--dim);background:#000a;
+            padding:4px 14px;border-radius:99px;border:1px solid var(--line)}
+
   /* ══ floating pills (glass mode) ═══════════════════════ */
   .pills{position:absolute;top:36px;left:14px;display:none;flex-direction:column;gap:10px;z-index:4}
   body.mode-glass .pills{display:flex}
@@ -163,7 +191,12 @@
 
 <header>
   <div class="logo">GARDEN<span>//</span>KART</div>
-  <div class="chip glassbar">CAR <b>1</b> · KARBEN</div>
+  <div class="switch glassbar" id="carseg">
+    <button class="on" data-car="1">CAR 1</button>
+    <button data-car="2">CAR 2</button>
+    <button data-car="3">CAR 3</button>
+    <button id="mGrid" style="border-left:1px solid var(--line);border-radius:0">▦ GRID</button>
+  </div>
   <div class="chip glassbar">DRIVER <b id="drv">SNOOP</b></div>
   <div style="flex:1"></div>
   <div class="switch glassbar">
@@ -174,6 +207,25 @@
 </header>
 
 <main>
+  <!-- grid view: spectate all cars, click a tile to take that car -->
+  <section class="gridview" id="gridview">
+    <div class="tile" data-car="1">
+      <span class="cam">CAM1 · H.264</span><span class="st live">LIVE</span>
+      <div class="info">SNOOP <small>· lap 3 · P2</small></div>
+      <div class="tspeed"><span class="tspd-n">62</span><small>km/h</small></div>
+    </div>
+    <div class="tile" data-car="2">
+      <span class="cam">CAM2 · H.264</span><span class="st live">LIVE</span>
+      <div class="info">MAX <small>· lap 3 · P1</small></div>
+      <div class="tspeed"><span class="tspd-n">71</span><small>km/h</small></div>
+    </div>
+    <div class="tile nosig" data-car="3">
+      <span class="cam">CAM3</span><span class="st off">OFFLINE</span>
+      <div class="msg">NO&nbsp;SIGNAL</div>
+      <div class="info">BUNNY <small>· car asleep</small></div>
+    </div>
+  </section>
+
   <section class="stage">
     <div class="crosshair"></div>
     <div class="osd tl rec">CAM1 · 640×360 · H.264</div>
@@ -233,8 +285,8 @@
 <footer>
   <div class="item" id="itembox" title="click or X">🍄<span class="use">X</span></div>
   <div class="hint">
-    <b>B</b> banana · <b>S</b> red shell · <b>C</b> countdown · <b>N</b> signal-loss<br>
-    <b>H</b> toggle HUD density — choice is remembered
+    <b>1-3</b> select car · <b>G</b> grid view · <b>H</b> HUD density<br>
+    <b>B</b> banana · <b>S</b> red shell · <b>C</b> countdown · <b>N</b> signal-loss · <b>X</b> item
   </div>
   <div class="laps">BEST <b>0:24.8</b></div>
 </footer>
@@ -259,6 +311,34 @@ try{saved=localStorage.getItem('gk-hud')||'glass'}catch(e){}
 setMode(saved);
 $('#mGlass').onclick=()=>setMode('glass');
 $('#mApex').onclick=()=>setMode('apex');
+
+/* ---- car selection + grid view ---- */
+const CARS={1:{drv:'SNOOP'},2:{drv:'MAX'},3:{drv:'BUNNY'}};
+let car=1, gridView=false;
+function applyView(){
+  document.body.classList.toggle('view-grid',gridView);
+  document.querySelectorAll('#carseg [data-car]').forEach(b=>
+    b.classList.toggle('on',!gridView&&+b.dataset.car===car));
+  $('#mGrid').classList.toggle('on',gridView);
+  $('#itembox').style.visibility=gridView?'hidden':'visible';
+}
+function selectCar(n){
+  if(!CARS[n])return;
+  if(n!==car){car=n;v=45+Math.random()*20;
+    $('#drv').textContent=CARS[n].drv;
+    document.querySelector('.osd.tl').textContent='CAM'+n+' · 640×360 · H.264';
+    feedLine('Now viewing CAR '+n+' ('+CARS[n].drv+')','sys');}
+  gridView=false;applyView();
+}
+document.querySelectorAll('#carseg [data-car]').forEach(b=>
+  b.onclick=()=>selectCar(+b.dataset.car));
+$('#mGrid').onclick=()=>{gridView=!gridView;applyView();};
+document.querySelectorAll('.tile').forEach(t=>
+  t.onclick=()=>selectCar(+t.dataset.car));
+/* live tile speeds */
+setInterval(()=>{document.querySelectorAll('.tile:not(.nosig) .tspd-n').forEach(el=>{
+  const base=+el.textContent||60;el.textContent=Math.round(
+    Math.max(0,Math.min(97,base+(Math.random()*8-4))));});},700);
 
 /* ---- fake telemetry ---- */
 let v=62, ms=42, steer=55;
@@ -292,7 +372,9 @@ $('#itembox').onclick=()=>{const it=$('#itembox');it.classList.remove('rolling')
 addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   if(k==='h')setMode(document.body.classList.contains('mode-glass')?'apex':'glass');
-  if(k==='x')$('#itembox').click();
+  if(k==='g'){gridView=!gridView;applyView();}
+  if(['1','2','3'].includes(k))selectCar(+k);
+  if(k==='x'&&!gridView)$('#itembox').click();
   if(k==='b'){flash('banana');document.body.classList.add('banana');
     toast('🍌 BANANA! STEER LIMIT 3s','bad');feedLine('Snoop hit banana — steer limit 3s','hit');
     setTimeout(()=>document.body.classList.remove('banana'),3000);}
