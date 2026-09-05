@@ -23,12 +23,12 @@ item layer that changes the race:
 ---
 
 ## Phase 0 — Foundations & Harness
-- [ ] Full audit of garden-branch codebase (routes, auth flow, stream bridge, HEVC autodetect)
+- [~] Full audit of garden-branch codebase (routes, auth flow, stream bridge, HEVC autodetect) → `docs/AUDIT.md` (Bunny/agent, in progress)
 - [ ] Repo structure: split 1600-line `webapp.py` into modules (`auth/`, `race/`, `video/`, `cars/`, `ws/`) — no behavior change
-- [ ] Local dev harness: **car simulator** (fake UDP car: handshake, heartbeat→ACK, video gen) so we can develop without the track PC
-- [ ] Golden-path smoke test script (connect → command → stream up)
-- [ ] Pin runtime deps + document track-PC environment `[?]` (Windows? which machine runs the cars?)
-- [ ] Per-commit discipline: small commits, push each to `v2-modern-cockpit`
+- [x] Local dev harness: **car simulator** (`sim/car_sim.py`) — protocol-accurate fake car, multi-sim ready, `sim/README.md`
+- [x] Golden-path smoke test script (`sim/smoke_test.py`) — 5/5 PASS on 2026-09-05 (handshake, fragment reassembly, H.264→JPEG decode, deadman stops stream)
+- [ ] Pin runtime deps + document track-PC environment `[?]` (Windows — specs unknown, see open Q2)
+- [x] Per-commit discipline: small commits, push each to `v2-modern-cockpit`
 
 ## Phase 1 — Security & Auth cleanup (keep existing model)
 - [ ] Discord OAuth = admins (`ADMIN_DISCORD_IDS`) + race friends (role allowlist)
