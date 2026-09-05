@@ -95,6 +95,10 @@ item layer that changes the race:
 | 4 | 2026-09-05 | Governor 75–80% default / 100% on boost | Mario Kart feel + real-world safety margin |
 | 5 | 2026-09-05 | Banana = steer-limit/slowdown, NOT full control inversion; red shell spin = time-boxed steering lock | Physical safety on a real track with people around |
 | 6 | 2026-09-05 | All item effects server-authoritative | Client code is visible/editable — no trust boundary at the browser |
+| 7 | 2026-09-05 | Design = **Hybrid**: serious sim cockpit while driving, Mario-Kart party look in lobby + item effects | Snoop's pick; mockups (GPT-image) before any UI code |
+| 8 | 2026-09-05 | Item triggering = **admin race-director console** (manual drag/place onto cars or zones) | No position telemetry; overheat later if we add camera tracking |
+| 9 | 2026-09-05 | Safety dial = **Soft**: steer-angle limit + mild slowdown 2–3s for banana/shell hits | Real track, real people; 'Wild' rejected |
+| 10 | 2026-09-05 | Frontend = **vanilla ES modules + modern CSS** (Riko's call per Snoop) | Prod runs on a Windows PC in a different LAN — zero build step, file copy deploy, no Node on track PC |
 
 ## Error / incident log
 | # | Date | What happened | Resolution |
@@ -102,7 +106,6 @@ item layer that changes the race:
 | — | — | (empty so far) | — |
 
 ## Open questions for Snoop
-1. Design direction + stack → asked 2026-09-05 (see `[?]` items)
-2. Track PC identity/OS (Windows scripts suggest a Windows box at the garden; Strix is dev-only?)
-3. Item triggering UX given zero position telemetry (admin race-director panel first?)
-4. Real-hardware test session slot (needed to validate latency targets)
+1. ~~Design/stack~~ → answered 2026-09-05 (hybrid design, RD console, soft safety, vanilla ES modules)
+2. Track PC specs/Windows version + does it already run cloudflared today? (deploy target = "different PC, different LAN, Windows")
+3. Real-hardware test session slot (needed to validate latency targets)
