@@ -104,26 +104,22 @@ def _load_guest_codes():
         pass
 
 
-# Persistent test code — always valid, never consumed
-guest_codes["ZENGARDEN"] = {
-    "created": time.time(),
-    "expires_at": time.time() + (365 * 24 * 3600),  # 1 year
-    "duration": 365 * 24 * 3600,
-    "redeemed_by": None,
-    "active": True,
-    "persistent": True,
-    "role": "driver",
-}
-
-guest_codes["ZENADMIN"] = {
-    "created": time.time(),
-    "expires_at": time.time() + (365 * 24 * 3600),  # 1 year
-    "duration": 365 * 24 * 3600,
-    "redeemed_by": None,
-    "active": True,
-    "persistent": True,
-    "role": "admin",
-}
+# Persistent codes are NOT hardcoded anymore (AUDIT §6.4: ZENGARDEN/ZENADMIN
+# were a source-visible backdoor incl. admin). Opt in via env instead:
+#   PERSISTENT_CODES=DRIVE-ABCD-EFGH:driver,MY-CODE:admin
+for _entry in os.environ.get("PERSISTENT_CODES", "").split(","):
+    _code, _, _role = _entry.strip().partition(":")
+    if not _code:
+        continue
+    guest_codes[_code.upper()] = {
+        "created": time.time(),
+        "expires_at": time.time() + (365 * 24 * 3600),  # 1 year
+        "duration": 365 * 24 * 3600,
+        "redeemed_by": None,
+        "active": True,
+        "persistent": True,
+        "role": _role or "driver",
+    }
 
 # Load saved codes from disk
 _load_guest_codes()
@@ -414,13 +410,15 @@ def is_admin(user):
 
 
 def generate_guest_code(duration_minutes=10):
-    """Generate a random drive code like DRIVE-AX7K-M9P2."""
-    import random
-    import string
+    """Generate a random drive code like DRIVE-AX7K-M9P2.
+
+    Codes are bearer credentials -> CSPRNG (AUDIT §6.5), not random.
+    """
+    import secrets
     chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # No ambiguous chars
     while True:
-        part1 = ''.join(random.choices(chars, k=4))
-        part2 = ''.join(random.choices(chars, k=4))
+        part1 = ''.join(secrets.choice(chars) for _ in range(4))
+        part2 = ''.join(secrets.choice(chars) for _ in range(4))
         code = f"DRIVE-{part1}-{part2}"
         with guest_codes_lock:
             if code not in guest_codes:
@@ -668,6 +666,9 @@ def start_driver(user_id):
     lobby["driver_started_at"] = time.time()
     lobby.pop("paused_remaining", None)
     lobby["emergency_stop"] = False
+    # Fresh watchdog window for the new driver
+    for slot in car_slots.values():
+        slot["last_control_at"] = time.time()
 
 
 def next_driver_locked(reason):
@@ -771,6 +772,30 @@ def ensure_timer():
     thread.start()
 
 
+CONTROL_SILENCE_SECONDS = int(os.environ.get("CONTROL_SILENCE_SECONDS", "3"))
+
+
+def watchdog_control_silence():
+    """If the active driver's client went silent, force neutral.
+
+    The heartbeat thread reinforces _last_motor_cmd forever; a dead browser
+    (no socket disconnect processed — e.g. mobile) would otherwise keep the
+    car driving at the last throttle. AUDIT §6.2.
+    """
+    if not lobby.get("active_driver") or lobby.get("paused"):
+        return
+    now = time.time()
+    for cid, slot in list(car_slots.items()):
+        last = slot.get("last_control_at")
+        if last is None:
+            slot["last_control_at"] = now
+            continue
+        if now - last > CONTROL_SILENCE_SECONDS:
+            slot["last_control_at"] = now  # avoid re-firing every second
+            if slot["car"].state in (ConnectionState.CONNECTED, ConnectionState.STREAMING):
+                send_neutral(f"control silence > {CONTROL_SILENCE_SECONDS}s", cid)
+
+
 def timer_loop():
     while True:
         time.sleep(1)
@@ -778,6 +803,7 @@ def timer_loop():
         should_broadcast = False
         # Expire guest sessions
         expire_guest_sessions()
+        watchdog_control_silence()
         with state_lock:
             if lobby["active_driver"] and not lobby["paused"]:
                 changed = advance_driver_if_due_locked("driver timer expired")
@@ -788,10 +814,12 @@ def timer_loop():
 
 
 def validate_control_user(user):
+    """Active-driver or admin may act on the car. Guests are drivers too
+    (role_for_user() knows only Discord ids — do not gate guests through it)."""
     active = lobby["active_driver"]
     if is_admin(user):
         return True
-    return bool(active and user["id"] == active and role_for_user(user["id"]) == "driver")
+    return bool(active and user["id"] == active)
 
 
 def clamp_int(value, default, min_value, max_value):
@@ -810,12 +838,21 @@ def handle_control_command(user, data):
         if cmd not in COMMANDS:
             return {"ok": False, "error": "invalid_command"}
 
+        # Server-side authorization (AUDIT §6.1): browser gating is not a boundary.
+        if lobby.get("emergency_stop") and not is_admin(user):
+            return {"ok": False, "error": "emergency_stop"}
+        if not validate_control_user(user):
+            return {"ok": False, "error": "unauthorized_driver"}
+
         max_speed = clamp_int(lobby.get("max_speed_percent", 100), MAX_REMOTE_SPEED_PERCENT, 5, 100)
         speed = clamp_int(data.get("speed", 100), 100, 0, 100)
         steer_range = clamp_int(data.get("steer_range", 100), 100, 0, 100)
         speed = min(speed, max_speed)
 
     success = slot["car"].send_command(cmd, speed=speed, steer_range=steer_range)
+    if success:
+        # Client-silence watchdog bookkeeping (AUDIT §6.2)
+        slot["last_control_at"] = time.time()
     return {"ok": success, "car": car_id, "command": cmd, "speed": speed, "steer_range": steer_range}
 
 
@@ -1155,7 +1192,11 @@ def api_guest_clear():
                 del guest_codes[c]
                 removed += 1
         else:
-            to_remove = [c for c, e in guest_codes.items() if not e["active"] or time.time() > e["expires_at"] and not e.get("persistent")]
+            # expires_at is None until first redemption (dormant) — guard it (AUDIT §6.6)
+            to_remove = [c for c, e in guest_codes.items()
+                         if not e.get("persistent")
+                         and (not e["active"]
+                              or (e["expires_at"] is not None and time.time() > e["expires_at"]))]
             for c in to_remove:
                 del guest_codes[c]
                 removed += 1
@@ -1213,14 +1254,13 @@ def api_guest_debug_generate():
 
 @app.route("/api/guest/test", methods=["GET"])
 def api_guest_test():
-    """Public test endpoint — returns a persistent code that never gets consumed."""
+    """Debug helper — disabled unless ENABLE_TEST_CODES=1 (AUDIT §6.3:
+    this endpoint used to hand out the admin code to anyone)."""
+    if os.environ.get("ENABLE_TEST_CODES") != "1":
+        return jsonify({"ok": False, "error": "disabled"}), 404
     return jsonify({
         "ok": True,
-        "code": "ZENGARDEN",
-        "admin_code": "ZENADMIN",
-        "message": "This is a persistent test code. It should always be redeemable.",
         "known_codes_count": len(guest_codes),
-        "known_codes": list(guest_codes.keys()),
     })
 
 
@@ -1370,7 +1410,14 @@ def api_command():
     data = request.get_json(silent=True) or {}
     data.setdefault("car", request.args.get("car"))
     result = handle_control_command(user, data)
-    status = 200 if result.get("ok") else 403
+    if result.get("ok"):
+        status = 200
+    elif result.get("error") in ("unauthorized_driver", "emergency_stop"):
+        status = 403
+    elif result.get("error") == "invalid_command":
+        status = 400
+    else:
+        status = 503  # transport/car-side failure, not an auth failure
     return jsonify(result), status
 
 

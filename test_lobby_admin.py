@@ -1,5 +1,6 @@
 import importlib
 import os
+import time
 import unittest
 from unittest.mock import patch
 
@@ -93,16 +94,28 @@ class AdminModerationTests(unittest.TestCase):
 
 
 class PersistentCodeTests(unittest.TestCase):
-    def test_zenadmin_redeems_as_admin(self):
-        user, error = webapp.redeem_guest_code("ZENADMIN")
+    """Persistent codes now come from PERSISTENT_CODES env (no source backdoor).
+    Seed the store the same way and verify redeem semantics."""
+
+    def setUp(self):
+        for code, role in (("PTEST-ADMIN-0001", "admin"), ("PTEST-DRV-0002", "driver")):
+            webapp.guest_codes[code] = {
+                "created": time.time(), "expires_at": time.time() + 3600,
+                "duration": 3600, "redeemed_by": None, "active": True,
+                "persistent": True, "role": role,
+            }
+            self.addCleanup(webapp.guest_codes.pop, code, None)
+
+    def test_persistent_admin_code_redeems_as_admin(self):
+        user, error = webapp.redeem_guest_code("PTEST-ADMIN-0001")
 
         self.assertIsNone(error)
         self.assertEqual(user["role"], "admin")
         self.assertTrue(user["can_connect"])
         self.assertTrue(webapp.is_admin(user))
 
-    def test_zengarden_redeems_as_driver(self):
-        user, error = webapp.redeem_guest_code("ZENGARDEN")
+    def test_persistent_driver_code_redeems_as_driver(self):
+        user, error = webapp.redeem_guest_code("PTEST-DRV-0002")
 
         self.assertIsNone(error)
         self.assertEqual(user["role"], "driver")

@@ -31,12 +31,17 @@ item layer that changes the race:
 - [x] Per-commit discipline: small commits, push each to `v2-modern-cockpit`
 
 ## Phase 1 — Security & Auth cleanup (keep existing model)
-- [ ] Discord OAuth = admins (`ADMIN_DISCORD_IDS`) + race friends (role allowlist)
-- [ ] Guest one-time codes stay (generate/revoke UI in admin panel); NO Cloudflare Access
-- [ ] Session hardening: httpOnly cookies, expiry, per-session car assignment
-- [ ] Lock every control API behind role checks (currently raw endpoints must not be reachable by guests/non-drivers)
-- [ ] Rate-limit control commands; input validation on all API bodies
-- [ ] Bans/kick preserved from lobby branch
+- [x] **CRITICAL fixed 2026-09-05**: `/api/command` + Socket.IO now enforce server-side active-driver/admin (was: any logged-in identity could drive any car — AUDIT §6.1)
+- [x] **CRITICAL fixed**: E-STOP blocks non-admin commands server-side; new **client-silence watchdog** — active driver's client silent >3s → forced neutral (was: heartbeat reinforced last throttle forever — AUDIT §6.2)
+- [x] **HIGH fixed**: `/api/guest/test` backdoor (served ZENADMIN admin code publicly) disabled; hardcoded ZENGARDEN/ZENADMIN seeds removed → env `PERSISTENT_CODES=CODE:role,...` (AUDIT §6.3/6.4)
+- [x] Guest codes now CSPRNG (`secrets`), `/api/guest/clear` dormant-code crash fixed, `/api/lights` guest-driver bug fixed, `/api/command` proper 403/400/503 mapping
+- [x] Regression suite `test_control_auth.py` — 10 tests lock all of the above (22/22 total unit tests green, sim smoke 5/5, `hermes verify` green)
+- [ ] Discord OAuth = admins (`ADMIN_DISCORD_IDS`) + race friends (role allowlist) — works, needs live creds (open Q4)
+- [ ] Guest one-time codes stay; add generate/revoke UI polish in admin panel
+- [ ] Session hardening: uniform auth middleware, rate limiting on redeem/login, CSRF posture review
+- [ ] `/api/lobby` anonymous leak (banned IDs + usernames) → require auth (next increment)
+- [ ] Lock remaining control API behind role checks / input validation sweep
+- [ ] Bans/kick preserved from lobby branch ✓ (verified by tests)
 
 ## Phase 2 — Control plane (WebSocket)
 - [ ] Replace 20Hz HTTP POSTs with WebSocket control channel (fallback: HTTP)
@@ -99,6 +104,8 @@ item layer that changes the race:
 | 8 | 2026-09-05 | Item triggering = **admin race-director console** (manual drag/place onto cars or zones) | No position telemetry; overheat later if we add camera tracking |
 | 9 | 2026-09-05 | Safety dial = **Soft**: steer-angle limit + mild slowdown 2–3s for banana/shell hits | Real track, real people; 'Wild' rejected |
 | 10 | 2026-09-05 | Frontend = **vanilla ES modules + modern CSS** (Riko's call per Snoop) | Prod runs on a Windows PC in a different LAN — zero build step, file copy deploy, no Node on track PC |
+| 11 | 2026-09-05 | ZENGARDEN/ZENADMIN persistent codes **removed**; replace via `PERSISTENT_CODES` env if the track still needs them | Source-visible admin backdoor + public `/api/guest/test` leak; **breaking** if the track relied on those codes — Snoop must re-grant via env or admin panel |
+| 12 | 2026-09-05 | E-STOP semantics: blocks all non-admin control until admin resumes | A driver's 20Hz loop must not override safety (AUDIT §6.2) |
 
 ## Error / incident log
 | # | Date | What happened | Resolution |
