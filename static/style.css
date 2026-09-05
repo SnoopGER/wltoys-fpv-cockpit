@@ -329,6 +329,9 @@ main {
 .btn-red:hover { background: rgba(255, 68, 85, 0.1); }
 .btn-blue { border-color: var(--blue); color: var(--blue); }
 .btn-blue:hover { background: rgba(0, 204, 255, 0.1); }
+.btn-yellow { border-color: var(--yellow); color: var(--yellow); }
+.btn-yellow:hover { background: rgba(255, 204, 0, 0.1); }
+.btn-yellow.active { background: rgba(255, 204, 0, 0.18); box-shadow: 0 0 8px rgba(255, 204, 0, 0.35); }
 
 .btn-active {
   background: rgba(255, 200, 0, 0.2);

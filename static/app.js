@@ -147,6 +147,13 @@ async function pollStatus() {
       fpsBadge.textContent = s.current_fps.toFixed(1) + ' fps';
       fpsBadge.style.color = s.current_fps > 15 ? 'var(--green)' : s.current_fps > 5 ? 'var(--yellow)' : 'var(--red)';
     }
+
+    // Server-measured input latency as fallback when no live socket ack
+    if (s.control_latency_ms != null) {
+      const badge = $('latencyBadge');
+      const ageBadge = badge && badge.textContent !== '-- ms' && badge.textContent !== 'null ms';
+      if (!ageBadge) renderLatencyBadge(s.control_latency_ms);
+    }
   } catch (e) {}
 }
 
@@ -160,6 +167,33 @@ async function pollLogs() {
       }
     }
   } catch (e) {}
+}
+
+// ── Control latency telemetry ────────────────────────────
+// clockOffset ≈ server_clock - client_clock, derived from socket RTT pings:
+//   offset = server_ts - (t0 + rtt/2)
+let clockOffsetMs = 0;
+let socketRttMs = null;
+let lastCmdSentTs = 0;
+
+function syncClockOffset() {
+  if (!socket || !socket.connected) return;
+  const t0 = Date.now() / 1000;
+  socket.timeout(3000).emit('control:rtt', { t0 }, function (err, resp) {
+    if (err || !resp || resp.t0 !== t0) return;
+    const now = Date.now() / 1000;
+    const rtt = now - t0;
+    socketRttMs = rtt * 1000;
+    clockOffsetMs = ((resp.server_ts - (t0 + rtt / 2)) * 1000);
+  });
+}
+
+function renderLatencyBadge(ms) {
+  const badge = $('latencyBadge');
+  if (!badge) return;
+  if (ms == null) { badge.textContent = '-- ms'; return; }
+  badge.textContent = Math.round(ms) + ' ms';
+  badge.style.color = ms < 80 ? 'var(--green)' : ms < 200 ? 'var(--yellow)' : 'var(--red)';
 }
 
 // ── Motor Control (continuous 20Hz while held) ───────────
@@ -192,7 +226,8 @@ function stopMotor() {
 
 async function sendMotorCmd(command) {
   try {
-    const payload = { car: selectedCar, command, speed: motorSpeed, steer_range: motorSteerRange, client_ts: Date.now() / 1000 };
+    lastCmdSentTs = Date.now() / 1000;
+    const payload = { car: selectedCar, command, speed: motorSpeed, steer_range: motorSteerRange, client_ts: lastCmdSentTs };
     if (socket && socket.connected) {
       socket.volatile.emit('control:command', payload);
       return;
@@ -242,6 +277,13 @@ function userLabel(user) {
 
 function renderLobby(data) {
   lobbyState = data;
+  // keep admin override button in sync with lobby truth
+  const ovBtn = document.getElementById('adminOverrideBtn');
+  if (ovBtn) {
+    const on = !!data.admin_override;
+    ovBtn.className = 'btn ' + (on ? 'btn-yellow active' : 'btn-blue');
+    ovBtn.textContent = on ? '🔒 RELEASE CONTROL' : '🔓 TAKE CONTROL';
+  }
   const active = data.active_driver;
   canControl = isAdmin() || (active && active.id === userId && userRole === 'driver');
   connected = Boolean(data.car_online);
@@ -457,9 +499,18 @@ function initSocket() {
     return;
   }
   socket = io({ withCredentials: true });
-  socket.on('connect', () => addLog('SYS', 'Lobby socket connected.'));
+  socket.on('connect', () => {
+    addLog('SYS', 'Lobby socket connected.');
+    syncClockOffset();
+    setInterval(syncClockOffset, 5000);
+  });
   socket.on('lobby:update', renderLobby);
   socket.on('control:ack', (data) => {
+    if (data && data.server_ts && lastCmdSentTs) {
+      // full loop: cmd sent -> server TX -> ack back (corrected for clock offset)
+      const loopMs = (Date.now() / 1000 + clockOffsetMs / 1000 - data.server_ts) * 1000;
+      renderLatencyBadge(loopMs);
+    }
     if (data && !data.ok && data.error !== 'stale_command') {
       addLog('WARN', 'Command rejected: ' + data.error);
     }

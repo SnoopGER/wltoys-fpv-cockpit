@@ -72,6 +72,20 @@ class CommandAuthTests(unittest.TestCase):
     def test_admin_can_drive_without_queue(self):
         self.assertTrue(self.cmd(ADMIN)["ok"])
 
+    def test_admin_override_blocks_active_driver(self):
+        webapp.start_driver("driver")
+        webapp.lobby["admin_override"] = True
+        self.assertEqual(self.cmd(DRIVER)["error"], "admin_override")
+        self.car.send_command.assert_not_called()
+        self.assertTrue(self.cmd(ADMIN)["ok"])  # admins keep control
+        webapp.lobby["admin_override"] = False
+
+    def test_command_tx_latency_recorded(self):
+        webapp.start_driver("driver")
+        before = len(webapp._tx_samples)
+        self.assertTrue(self.cmd(DRIVER)["ok"])
+        self.assertEqual(len(webapp._tx_samples), before + 1)
+
     def test_emergency_stop_blocks_driver(self):
         webapp.start_driver("driver")
         webapp.lobby["emergency_stop"] = True

@@ -1,0 +1,4 @@
+# dev-only deps for sim/socket_e2e.py (control-plane regression)
+python-socketio>=5.11
+websocket-client>=1.7
+requests>=2.31

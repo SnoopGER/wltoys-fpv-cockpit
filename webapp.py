@@ -10,6 +10,7 @@ import json
 import time
 import secrets
 import threading
+from collections import deque
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
@@ -306,6 +307,7 @@ def save_banned_ids():
 lobby = {
     "paused": False,
     "emergency_stop": False,
+    "admin_override": False,  # race-director hold: only admins may drive
     "max_speed_percent": MAX_REMOTE_SPEED_PERCENT,
     "session_duration": DEFAULT_DRIVE_SECONDS,
     "active_driver": None,
@@ -596,6 +598,7 @@ def public_user(user):
         "connections": len(lobby.get("user_sids", {}).get(user_id, set())),
         "banned": is_banned_user(user_id),
         "active": lobby.get("active_driver") == user_id,
+        "admin_override": lobby.get("admin_override", False),
         "queued": user_id in lobby.get("queue", []),
     }
 
@@ -634,6 +637,7 @@ def lobby_snapshot():
             "me": me,
             "paused": lobby["paused"],
             "emergency_stop": lobby["emergency_stop"],
+            "admin_override": lobby.get("admin_override", False),
             "active_driver": public_user(lobby["users"].get(active_id)) if active_id else None,
             "remaining_drive_time": seconds_remaining(),
             "queue": [public_user(lobby["users"].get(uid, {"id": uid, "username": uid})) for uid in lobby["queue"]],
@@ -839,9 +843,58 @@ def clamp_int(value, default, min_value, max_value):
     return max(min_value, min(max_value, value))
 
 
-def handle_control_command(user, data):
+_latency_lock = threading.Lock()
+_latency_samples = deque(maxlen=100)
+_tx_samples = deque(maxlen=100)
+
+
+def note_control_rx(data, rx_ts):
+    """Record one-way input->server latency from client_ts (needs rough
+    clock sync; client derives offset via control:rtt)."""
+    try:
+        client_ts = float((data or {}).get("client_ts"))
+    except (TypeError, ValueError):
+        return
+    if client_ts <= 0:
+        return
+    one_way = rx_ts - client_ts
+    if 0 <= one_way < 5.0:  # ignore clock-skew outliers / negative time travel
+        with _latency_lock:
+            _latency_samples.append(one_way * 1000.0)
+
+
+def note_command_tx(rx_ts, tx_ts):
+    """Server-side pipeline: command received -> UDP packet handed to car."""
+    dt = (tx_ts - rx_ts) * 1000.0
+    if 0 <= dt < 5000:
+        with _latency_lock:
+            _tx_samples.append(dt)
+
+
+def latency_stats():
+    with _latency_lock:
+        vals = sorted(_latency_samples)
+        txvals = sorted(_tx_samples)
+    if not vals:
+        return {"control_latency_ms": None, "control_latency_avg_ms": None,
+                "control_latency_p95_ms": None, "control_latency_samples": 0}
+    avg = sum(vals) / len(vals)
+    p95 = vals[min(len(vals) - 1, int(len(vals) * 0.95))]
+    stats = {"control_latency_ms": round(vals[-1], 1),
+             "control_latency_avg_ms": round(avg, 1),
+             "control_latency_p95_ms": round(p95, 1),
+             "control_latency_samples": len(vals)}
+    if txvals:
+        stats["control_tx_avg_ms"] = round(sum(txvals) / len(txvals), 2)
+        stats["control_tx_p95_ms"] = round(txvals[min(len(txvals) - 1, int(len(txvals) * 0.95))], 2)
+    return stats
+
+
+def handle_control_command(user, data, rx_ts=None):
     car_id = normalize_car_id(data.get("car"))
     slot = init_car(car_id)
+    if rx_ts is None:
+        rx_ts = time.time()
     with state_lock:
         cmd = data.get("command", "stop")
         if cmd not in COMMANDS:
@@ -850,6 +903,9 @@ def handle_control_command(user, data):
         # Server-side authorization (AUDIT §6.1): browser gating is not a boundary.
         if lobby.get("emergency_stop") and not is_admin(user):
             return {"ok": False, "error": "emergency_stop"}
+        # Input priority (ROADMAP Phase 2): admin override outranks the driver.
+        if lobby.get("admin_override") and not is_admin(user):
+            return {"ok": False, "error": "admin_override"}
         if not validate_control_user(user):
             return {"ok": False, "error": "unauthorized_driver"}
 
@@ -861,7 +917,9 @@ def handle_control_command(user, data):
     success = slot["car"].send_command(cmd, speed=speed, steer_range=steer_range)
     if success:
         # Client-silence watchdog bookkeeping (AUDIT §6.2)
-        slot["last_control_at"] = time.time()
+        now = time.time()
+        slot["last_control_at"] = now
+        note_command_tx(rx_ts, now)
     return {"ok": success, "car": car_id, "command": cmd, "speed": speed, "steer_range": steer_range}
 
 
@@ -1137,6 +1195,10 @@ def api_admin(action):
             unban_user(target_id)
         elif action == "clear_queue":
             lobby["queue"] = []
+        elif action == "admin_override":
+            lobby["admin_override"] = bool(data.get("value", True))
+            if lobby["admin_override"]:
+                send_neutral("admin override engaged")
         elif action == "set_max_speed":
             lobby["max_speed_percent"] = clamp_int(data.get("value"), MAX_REMOTE_SPEED_PERCENT, 5, 100)
         elif action == "set_session_duration":
@@ -1416,6 +1478,7 @@ def api_status():
     status["car"] = car_id
     status["label"] = CAR_CONFIGS[car_id]["label"]
     status["ssid"] = CAR_CONFIGS[car_id]["ssid"]
+    status.update(latency_stats())
     return jsonify(status)
 
 
@@ -1437,10 +1500,12 @@ def api_command():
         return error
     data = request.get_json(silent=True) or {}
     data.setdefault("car", request.args.get("car"))
-    result = handle_control_command(user, data)
+    rx_ts = time.time()
+    result = handle_control_command(user, data, rx_ts=rx_ts)
+    note_control_rx(data, rx_ts)
     if result.get("ok"):
         status = 200
-    elif result.get("error") in ("unauthorized_driver", "emergency_stop"):
+    elif result.get("error") in ("unauthorized_driver", "emergency_stop", "admin_override"):
         status = 403
     elif result.get("error") == "invalid_command":
         status = 400
@@ -1642,11 +1707,29 @@ def ws_disconnect():
 
 @socketio.on("control:command")
 def ws_control_command(data):
+    rx_ts = time.time()
     user = current_user()
     if not user:
         emit("control:ack", {"ok": False, "error": "login_required"})
         return
-    emit("control:ack", handle_control_command(user, data or {}))
+    result = handle_control_command(user, data or {}, rx_ts=rx_ts)
+    note_control_rx(data, rx_ts)
+    emit("control:ack", dict(result, echo_ts=(data or {}).get("client_ts"),
+                             server_ts=rx_ts))
+
+
+@socketio.on("control:rtt")
+def ws_control_rtt(data):
+    """Clock-sync/RTT ping: client measures rtt = now - t0 and derives
+    server<->client clock offset from (server_ts - t0 - rtt/2)."""
+    raw = (data or {}).get("t0")
+    t0 = None
+    if raw is not None:
+        try:
+            t0 = float(raw)
+        except (TypeError, ValueError):
+            t0 = None
+    emit("control:rtt:ack", {"t0": t0, "server_ts": time.time()})
 
 
 if __name__ == "__main__":

@@ -53,6 +53,7 @@
       {% endif %}
     </div>
     <span class="fps-badge" id="fpsBadge">-- fps</span>
+    <span class="fps-badge" id="latencyBadge" title="Control latency: key/gamepad -> car packet TX (clock-synced estimate)">-- ms</span>
   </div>
 </header>
 
@@ -129,6 +130,11 @@
         <button class="btn btn-blue" onclick="adminAction('next_driver')">NEXT</button>
         <button class="btn btn-red" onclick="adminAction('kick_current_driver')">KICK</button>
         <button class="btn" onclick="adminAction('clear_queue')">CLEAR</button>
+      </div>
+      <div class="button-row">
+        <button class="btn {{ 'btn-yellow active' if user.admin_override else 'btn-blue' }}" id="adminOverrideBtn"
+                onclick="adminAction('admin_override', { value: !(lobbyState && lobbyState.admin_override) })"
+                title="Take control: car goes neutral and only admins can drive until released">{{ '🔒 RELEASE CONTROL' if user.admin_override else '🔓 TAKE CONTROL' }}</button>
       </div>
       <div class="motor-sliders">
         <div class="slider-row">

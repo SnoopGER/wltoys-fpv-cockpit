@@ -48,10 +48,10 @@ item layer that changes the race:
 - [ ] Bans/kick preserved from lobby branch ✓ (verified by tests)
 
 ## Phase 2 — Control plane (WebSocket)
-- [ ] Replace 20Hz HTTP POSTs with WebSocket control channel (fallback: HTTP)
-- [ ] Server-side command scheduler: heartbeat continuity, deadman failsafe (car → neutral if ws drops)
-- [ ] Input priority: admin override > active driver > queue
-- [ ] Latency measurement hooks: input→TX timestamp, display one-way + round-trip estimates
+- [x] WebSocket control channel with HTTP fallback — verified E2E (sim/socket_e2e.py, was already Socket.IO-first on this branch; now locked by regression test)
+- [x] Server-side command scheduler: heartbeat continuity, deadman failsafe (client-silence watchdog, Phase 1) + latency bookkeeping per command
+- [x] Input priority: admin override > active driver > queue — new `admin_override` lobby lock (admin action `admin_override` {value:bool}: engages → car neutral, non-admin commands rejected 403 `admin_override`; RELEASE CONTROL button in admin panel)
+- [x] Latency measurement hooks: `control:rtt` clock-sync ping, per-command `server_ts`/`echo_ts` in ack, server rolling input→RX and RX→UDP-TX stats in `/api/status` (`control_latency_*`, `control_tx_*`), cockpit latency badge (green <80ms / yellow <200ms / red)
 
 ## Phase 3 — Video pipeline (latency is the game)
 - [ ] Send raw H.264 over WebSocket to browser; **WebCodecs `VideoDecoder`** render (Chrome/Edge/Safari 17+)
