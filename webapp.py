@@ -323,10 +323,28 @@ lobby = {
     "banned_ids": load_banned_ids(),
 }
 
-# Phase 4 race engine (server-authoritative, ROADMAP D4-D9). Idle unless an
+# Phase 4 race engine (server-authoritative, ROADMAP D4-D9, D15). Idle unless an
 # admin starts a race — free-drive behavior is untouched while state == idle.
+# D15: during a race the governor IS the ceiling (default 70%); boost unlocks
+# RACE_BOOST_MAX_PERCENT (100 = full car power) for RACE_BOOST_SECONDS, then a
+# RACE_BOOST_COOLDOWN_SECONDS recovery window blocks re-use.
 from race_engine import RaceEngine  # noqa: E402
-race = RaceEngine(env_int("RACE_GOVERNOR_PERCENT", 80, 5, 100))
+
+
+def _env_float(name, default):
+    try:
+        raw = os.environ.get(name)
+        return float(raw) if raw not in (None, "") else default
+    except (TypeError, ValueError):
+        return default
+
+
+race = RaceEngine(
+    env_int("RACE_GOVERNOR_PERCENT", 70, 5, 100),
+    boost_seconds=_env_float("RACE_BOOST_SECONDS", 5.0),
+    boost_cooldown=_env_float("RACE_BOOST_COOLDOWN_SECONDS", 15.0),
+    boost_max=env_int("RACE_BOOST_MAX_PERCENT", 100, 5, 100),
+)
 
 
 def normalize_car_id(car_id=None):
@@ -924,15 +942,18 @@ def handle_control_command(user, data, rx_ts=None):
         max_speed = clamp_int(lobby.get("max_speed_percent", 100), MAX_REMOTE_SPEED_PERCENT, 5, 100)
         speed = clamp_int(data.get("speed", 100), 100, 0, 100)
         steer_range = clamp_int(data.get("steer_range", 100), 100, 0, 100)
-        speed = min(speed, max_speed)
 
-        # Phase 4: server-authoritative race modifiers (governor + items).
-        # Applied AFTER the lobby cap: MAX_REMOTE_SPEED_PERCENT still bounds
-        # everything upstream; boost only releases the RACE governor.
+        # Speed ceilings (D15, Snoop 2026-09-06):
+        #  free-drive -> lobby cap (MAX_REMOTE_SPEED_PERCENT bounds the slider)
+        #  race       -> the ceiling lives in the race engine: governor limits
+        #               everyone (default 70), 🍄 boost releases to 100% power.
+        #               The lobby slider must NOT clamp first, or boost == baseline.
         race_meta = None
         if race.active:
             cmd, speed, steer_range, race_meta = race.modify(
                 user["id"], cmd, speed, steer_range)
+        else:
+            speed = min(speed, max_speed)
 
     success = slot["car"].send_command(cmd, speed=speed, steer_range=steer_range)
     if success:

@@ -115,9 +115,40 @@ class EffectTests(unittest.TestCase):
         _, s, _, meta = self.mod(speed=100)
         self.assertEqual(s, 100)
         self.assertIn("boost", meta["effects"])
-        self.clock.advance(3.1)
+        self.clock.advance(5.1)  # default boost is 5s (Snoop 2026-09-06)
         _, s, _, _ = self.mod(speed=100)
         self.assertEqual(s, 80)  # expired
+
+    def test_boost_cooldown(self):
+        self.assertTrue(self.e.grant_item("driver", "boost"))
+        self.clock.advance(5.1)          # boost expired...
+        self.assertFalse(self.e.grant_item("driver", "boost"))  # ...cooldown on
+        self.clock.advance(14.9)         # 5 + 15 total elapsed
+        self.assertTrue(self.e.grant_item("driver", "boost"))
+        # other items unaffected by boost cooldown
+        self.assertTrue(self.e.grant_item("driver", "banana"))
+        # a different driver has an independent cooldown
+        self.assertTrue(self.e.grant_item("other", "boost"))
+
+    def test_race_restart_clears_cooldown(self):
+        self.e.grant_item("driver", "boost")
+        self.clock.advance(5.1)
+        self.assertFalse(self.e.grant_item("driver", "boost"))
+        self.e.finish()
+        self.e.start()
+        self.clock.advance(3.1)
+        self.assertTrue(self.e.grant_item("driver", "boost"))
+
+    def test_boost_custom_params(self):
+        e = RaceEngine(70, boost_seconds=8.0, boost_cooldown=20.0,
+                       clock=self.clock)
+        e.start(); self.clock.advance(3.1); e.tick()
+        e.grant_item("d", "boost")
+        self.clock.advance(7.9)
+        _, s, _, _ = e.modify("d", "forward", 100, 50)
+        self.assertEqual(s, 100)     # 8s duration
+        self.clock.advance(0.2)
+        self.assertFalse(e.grant_item("d", "boost"))
 
     def test_banana_limits_steer_and_throttle(self):
         self.e.grant_item("driver", "banana")
@@ -192,14 +223,24 @@ class HotPathWiringTests(unittest.TestCase):
         self.assertEqual(r["speed"], 70)  # lobby cap, no race meta
         self.assertNotIn("race", r)
 
-    def test_race_governor_applied_server_side(self):
+    def test_race_governor_is_the_ceiling_not_lobby(self):
+        # D15: lobby cap 70 must NOT clamp during a race; governor 80 rules
         webapp.race.start()
         self.clock.advance(3.1)
         webapp.race.tick()
         r = self.cmd(DRIVER, speed=100)
-        # lobby 70 cap still upstream: min(100,70)=70 <= governor 80
-        self.assertEqual(r["speed"], 70)
+        self.assertEqual(r["speed"], 80)
         self.assertEqual(r["race"]["governor"], 80)
+
+    def test_boost_breaks_lobby_cap_to_100(self):
+        # Snoop 2026-09-06: boost unlocks 100% car power even though the
+        # free-drive ceiling (MAX_REMOTE lobby 70) would say otherwise
+        webapp.race.start()
+        self.clock.advance(3.1)
+        webapp.race.tick()
+        self.assertTrue(webapp.race.grant_item("driver", "boost"))
+        r = self.cmd(DRIVER, speed=100)
+        self.assertEqual(r["speed"], 100)
 
     def test_race_countdown_neutralizes_client(self):
         webapp.race.start()
@@ -217,8 +258,9 @@ class HotPathWiringTests(unittest.TestCase):
             DRIVER, {"car": "car1", "command": "right", "speed": 100,
                      "steer_range": 100})
         self.assertEqual(r["steer_range"], 35)
+        self.assertEqual(r["speed"], 60)  # 100 * 0.6, governor 80 not binding
         self.car.send_command.assert_called_once_with(
-            "right", speed=r["speed"], steer_range=35)
+            "right", speed=60, steer_range=35)
 
     def test_estop_outranks_race(self):
         webapp.race.start()

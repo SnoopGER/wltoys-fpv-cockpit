@@ -2,8 +2,9 @@
 
 Design rules (locked in ROADMAP decision log):
 - D6: all race state + item effects live HERE, never in the browser.
-- D4: during a race the governor caps throttle (default 80%); 🍄 boost
-  unlocks up to 100%. Never above the protocol max (handled upstream).
+- D4/D15: during a race the governor caps throttle (default 70%); 🍄 boost
+  unlocks 100% car power for RACE_BOOST_SECONDS (5s), then a 15s cooldown.
+  The lobby/free-drive cap does NOT apply during a race — the engine owns it.
 - D5/D9: SOFT safety only. Banana = steer-angle limit + mild slowdown.
   Red shell = time-boxed one-sided steering lock (max ~1s) + brake pulse.
   NO full control inversion, ever.
@@ -22,8 +23,9 @@ FINISHED = "finished"
 
 #: item -> (duration seconds, params). Durations are safety-bounded below.
 ITEMS = {
-    # boost: governor releases to `max` throttle for duration
-    "boost":  (3.0, {"max_throttle": 100}),
+    # boost params are parameterized per-engine (Snoop 2026-09-06):
+    # default 5s unlock to 100% power, 15s cooldown before re-use
+    "boost":  (5.0, {"max_throttle": 100}),
     # banana: steer angle limited + throttle reduced (soft, never reversed)
     "banana": (3.0, {"steer_limit": 35, "throttle_factor": 0.6}),
     # red shell impact: time-boxed one-sided steering lock + brake pulse
@@ -36,14 +38,21 @@ MAX_DURATION = 10.0  # hard safety ceiling for any effect
 
 
 class RaceEngine:
-    def __init__(self, governor_percent=80, clock=time.monotonic):
+    def __init__(self, governor_percent=70, boost_seconds=5.0,
+                 boost_cooldown=15.0, boost_max=100, clock=time.monotonic):
         self.clock = clock
         self.governor_percent = max(5, min(100, int(governor_percent)))
+        # D15 (2026-09-06, Snoop): during a race the ceiling lives HERE —
+        # governor limits everyone; boost releases to boost_max (100% power).
+        self.boost_seconds = min(float(boost_seconds), MAX_DURATION)
+        self.boost_cooldown = max(0.0, float(boost_cooldown))
+        self.boost_max = max(5, min(100, int(boost_max)))
         self.state = IDLE
         self.state_since = self.clock()
         self.countdown_until = None
         self.results = []            # [{"user": id, "finish_ts": t, "place": n}]
         self._effects = {}           # user_id -> {item: {"until": t, "params": ...}}
+        self._cooldowns = {}         # (user_id, "boost") -> ready_at
         self._immune_until = {}      # deprecated placeholder (star handled via effects)
 
     # ------------------------------------------------------------------ state
@@ -58,6 +67,7 @@ class RaceEngine:
             return False
         self.results = []
         self._effects.clear()
+        self._cooldowns.clear()
         self.state = COUNTDOWN
         self.state_since = self.clock()
         self.countdown_until = self.clock() + 3.0
@@ -87,6 +97,7 @@ class RaceEngine:
         self.countdown_until = None
         self.results = []
         self._effects.clear()
+        self._cooldowns.clear()
 
     def tick(self):
         """Advance countdown -> green. Returns True if state changed."""
@@ -114,10 +125,19 @@ class RaceEngine:
     def grant_item(self, user_id, item):
         if item not in ITEMS:
             return False
-        duration, params = ITEMS[item]
-        duration = min(duration, MAX_DURATION)
-        if item == "redshell" and self._has_effect(user_id, "star"):
-            return False  # star immunity
+        if item == "boost":
+            if self.clock() < self._cooldowns.get((user_id, "boost"), 0.0):
+                return False  # boost cooldown active
+            duration = self.boost_seconds
+            params = {"max_throttle": self.boost_max}
+            # cooldown spans the boost itself + the recovery window
+            self._cooldowns[(user_id, "boost")] = (
+                self.clock() + duration + self.boost_cooldown)
+        else:
+            duration, params = ITEMS[item]
+            duration = min(duration, MAX_DURATION)
+            if item == "redshell" and self._has_effect(user_id, "star"):
+                return False  # star immunity
         self._effects.setdefault(user_id, {})[item] = {
             "until": self.clock() + duration, "params": dict(params)}
         return True
@@ -215,6 +235,10 @@ class RaceEngine:
             "active_effects": {
                 uid: sorted(self._effects[uid].keys())
                 for uid in list(self._effects) if self._effects.get(uid)},
+            "boost_cooldown_remaining": {
+                uid: round(max(0.0, ready - self.clock()), 1)
+                for (uid, kind), ready in self._cooldowns.items()
+                if kind == "boost" and ready > self.clock()},
         }
 
     def _prune_all(self):

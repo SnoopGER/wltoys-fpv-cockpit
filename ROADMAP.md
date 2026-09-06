@@ -63,7 +63,7 @@ item layer that changes the race:
 
 ## Phase 4 — Race engine (server-authoritative)
 - [~] Race session state machine: idle → countdown (3s, all cars neutral) → green → finished + finish-order bookkeeping — **engine done 2026-09-05** (`race_engine.py`, injected clock, 21 tests); HUD display pending Phase 6
-- [~] Speed governor in car command layer (default 80% via `RACE_GOVERNOR_PERCENT`, boost → 100%, never above `MAX_REMOTE_SPEED_PERCENT` — set that env to 100 at the track if you want full-speed boost)
+- [x] Speed governor in car command layer — **D15 semantics implemented 2026-09-06**: race governor (default 70, `RACE_GOVERNOR_PERCENT`) owns the ceiling; 🍄 boost → 100% power (`RACE_BOOST_MAX_PERCENT`) for `RACE_BOOST_SECONDS` (5s) with `RACE_BOOST_COOLDOWN_SECONDS` (15s) lockout; free-drive lobby cap untouched. HUD cooldown ring pending Phase 6
 - [~] Effect system: timed modifiers on throttle/steer (stackable, priority-safe) — boost/banana/redshell/star server-side; item bag UX pending
 - [x] **Safety gates (hard rule):** red-shell "spin" = 1s ONE-SIDED bounded turn (`forward_right`, never through center, soft-throttled); banana = steer-magnitude limit + slowdown, never inversion; E-STOP still outranks everything (locked by test); global admin kill switch; per-car disable
 - [ ] Persistence: SQLite for races, results, drivers, guest codes (replace scattered JSON files)
@@ -112,6 +112,7 @@ item layer that changes the race:
 | 12 | 2026-09-05 | E-STOP semantics: blocks all non-admin control until admin resumes | A driver's 20Hz loop must not override safety (AUDIT §6.2) |
 | 13 | 2026-09-05 | **Frontend direction:** ONE drive cockpit with a **Glass ⇄ Apex density toggle** (persisted per browser), **Pitlane** as lobby/RD-console style; NO three-skin dropdown | Snoop's call after design lab review; maintenance stays one-layout + one party theme |
 | 14 | 2026-09-06 | **Video: speed wins.** WebCodecs H.264 WS relay = primary; per-car codec probe at track; HEVC cars ride MJPEG fallback until transcode/car-config decision. Speed ceilings: run 70 first, bump to 80 only if it feels slow | Snoop delegated ("fast video, controls must not feel laggy"); latency target ≤150 ms tunnel, lower is better |
+| 15 | 2026-09-06 | **Speed model (supersedes D4 numbers):** during a race the ceiling lives in the race engine — governor limits all cars (default **70**, env `RACE_GOVERNOR_PERCENT`); 🍄 boost unlocks **100% car power** for `RACE_BOOST_SECONDS` (5s), then `RACE_BOOST_COOLDOWN_SECONDS` (15s) lockout. Free-drive keeps the lobby/MAX_REMOTE cap. Lobby clamp must NOT pre-clamp race commands | Snoop: "default speed is 100 limit but cars limited to 70/80 unless BOOST is active" — old layering made boost == baseline; fixed + locked by tests |
 
 ## Error / incident log
 | # | Date | What happened | Resolution |
@@ -125,7 +126,7 @@ item layer that changes the race:
 2. ~~Track PC~~ → answered 2026-09-06: old V1 already deployed and running there, a Hermes instance on that box assists with ports + git clone → use `docs/track-session-checklist.md`
 3. ~~Real-hardware test slot~~ → answered: track session 2026-09-06 afternoon
 4. Discord OAuth — **worked previously**, so creds + redirect URI exist in the old deployment's env; TASK: copy them verbatim into the V2 env (exact same redirect string). Persistent codes: old ZEN-* backdoors dead; replacement env pattern in checklist, new codes handed to Snoop privately.
-5. Speed ceilings → answered: **test at 70 first, raise `MAX_REMOTE_SPEED_PERCENT` to 80 only if it feels slow**. (Note: race boost can only unlock up to MAX_REMOTE — at 70 boost == baseline; becomes meaningful when ceiling goes to 80.)
+5. Speed ceilings → answered + superseded by **D15**: race ceiling lives in the engine (governor 70 default, boost → 100% power, 5s/15s cooldown, all env-tunable). Free-drive stays capped at 70.
 6. HEVC → **Riko's call (D14, speed wins)**: WebCodecs H.264 relay is the primary path; probe `codec` per car at the track via `/api/video-token?car=carN`. HEVC-streaming cars ride the MJPEG fallback until we decide transcode-vs-car-config. Decision after track numbers.
-7. Item UX → explained to Snoop 2026-09-06 (RD does bookkeeping by hand: finish taps, drag items, tap armed zones); confirm item-use button mapping on the actual controllers at the track
+7. Item UX → answered 2026-09-06: manual RD bookkeeping OK for now; **IR lap/time tracker exists in Snoop's gear shed — not fitted on the tiny cars yet → future Phase-5 upgrade path** (auto positions/laps). Item-use button mapping to be decided on the real controllers at the track.
 8. Latency target → answered: ≤150 ms tunnel acceptable, faster is better; measure LAN vs tunnel in test #8
