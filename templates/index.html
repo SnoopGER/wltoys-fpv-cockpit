@@ -328,7 +328,11 @@
 <script>
 async function vrCtl(action) {
   const r = await fetch('/api/virtual/' + action, { method: 'POST' });
-  if (!r.ok) alert('virtual race ' + action + ' failed: ' + r.status);
+  let j = {};
+  try { j = await r.json(); } catch (e) {}
+  if (!r.ok) alert('virtual race ' + action + ' failed: HTTP ' + r.status +
+                   (r.status === 403 ? ' (admin code required)' : ''));
+  else if (j.ok === false) alert('virtual race ' + action + ': not possible in state "' + j.state + '" — try VR RESET first');
 }
 </script>
 </body>
