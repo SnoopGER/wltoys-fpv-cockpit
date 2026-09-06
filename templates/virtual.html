@@ -21,19 +21,66 @@
               color: #ffd319; text-shadow: 0 0 12px rgba(255,45,149,0.9), 0 2px 6px #000; }
   #vr-help { bottom: 14px; left: 14px; font-size: 11px; opacity: 0.6;
              line-height: 1.5; }
+
+  #vr-pos { top: 12px; left: 50%; transform: translateX(-110%);
+            font-size: clamp(20px, 4vw, 34px); font-weight: 800; color: #00e5ff; }
+  #vr-lap { top: 16px; left: 50%; transform: translateX(15%);
+            font-size: clamp(12px, 2vw, 16px); opacity: 0.9; letter-spacing: 1px; }
+
+  #vr-countdown { inset: 0; display: none; align-items: center; justify-content: center;
+                  font-size: clamp(64px, 18vw, 160px); font-weight: 900; color: #fff;
+                  text-shadow: 0 0 30px #ff2d95, 0 0 60px #7b2dff; }
+
+  #vr-items { bottom: 18px; left: 50%; transform: translateX(-50%);
+              display: flex; gap: 10px; }
+  .vr-item { position: relative; width: 52px; height: 52px; border-radius: 10px;
+             background: rgba(11,4,22,0.72); border: 1px solid #4a3a6b;
+             display: flex; align-items: center; justify-content: center;
+             font-size: 24px; }
+  .vr-item-key { position: absolute; top: 2px; left: 5px; font-size: 10px; opacity: 0.7; }
+  .vr-item-cd { opacity: 0.35; }
+  .vr-item-cd::after { content: ''; position: absolute; inset: 0; border-radius: 10px;
+             background: conic-gradient(rgba(0,0,0,0.75) calc(var(--cd) * 360deg), transparent 0); }
+  .vr-item-active { border-color: #ffd319; box-shadow: 0 0 12px rgba(255,211,25,0.8); }
+
+  #vr-flash { inset: 0; background: radial-gradient(ellipse at center,
+              transparent 30%, rgba(255,40,40,0.85) 100%);
+              opacity: 0; transition: opacity 0.05s linear; }
+  #vr-toast { top: 64px; left: 50%; transform: translateX(-50%);
+              background: rgba(11,4,22,0.85); border: 1px solid #ff2d95;
+              padding: 8px 16px; border-radius: 8px; font-size: 13px;
+              opacity: 0; transition: opacity 0.3s; }
+  #vr-status { top: 48px; left: 12px; font-size: 12px; color: #ffd319; }
+
+  #vr-results { inset: 0; display: none; align-items: center; justify-content: center;
+                flex-direction: column; background: rgba(4,2,10,0.82); }
+  #vr-results h2 { color: #ffd319; letter-spacing: 4px; margin-bottom: 18px;
+                   text-shadow: 0 0 20px #ff2d95; }
+  .vr-res-row { color: #fff; font-size: clamp(16px, 3vw, 22px); padding: 4px 0; }
+  .vr-res-row b { color: #00e5ff; }
 </style>
 </head>
 <body>
   <canvas id="road"></canvas>
+  <div id="vr-flash" class="vr-hud"></div>
   <div id="vr-mode" class="vr-hud">VIRTUAL RACE</div>
   <div id="vr-fps" class="vr-hud"></div>
+  <div id="vr-pos" class="vr-hud"></div>
+  <div id="vr-lap" class="vr-hud"></div>
   <div id="vr-speed" class="vr-hud">--</div>
+  <div id="vr-items" class="vr-hud"></div>
+  <div id="vr-countdown" class="vr-hud"></div>
+  <div id="vr-toast" class="vr-hud"></div>
+  <div id="vr-status" class="vr-hud"></div>
+  <div id="vr-results" class="vr-hud"></div>
   <div id="vr-help" class="vr-hud">
-    ↑/W throttle · ↓/S brake · ←→/A D steer · SHIFT turbo (dev)
+    ↑/W throttle · ↓/S brake · ←→/A D steer · 1 🚀 2 🐚 3 🍌 4 ⭐<br>
+    gamepad: stick steer · RT throttle · LT brake · A 🚀 X 🐚 B 🍌 Y ⭐
   </div>
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.7.5/dist/socket.io.min.js"></script>
   <script>
     window.VR_CONFIG = {
-      mode: {{ ('dev' if (dev_mode or not user) else 'live') | tojson }},
+      mode: {{ ('dev' if dev_mode else ('live' if user else 'anon')) | tojson }},
       trackLength: {{ vr_track_length | tojson }},
       user: {{ user | tojson }}
     };

@@ -1896,7 +1896,7 @@ def api_stream_smart():
 #  virtual_race.py. D22: E-STOP freezes the virtual world too.
 # ════════════════════════════════════════════════════════════════
 
-from virtual_race import VirtualRace
+from virtual_race import VirtualRace, FINISHED as VR_FINISHED
 
 VR_COLORS = ("#ff2d95", "#00e5ff", "#ffd319", "#7cff6b",
              "#ff8c42", "#b388ff", "#ff5252", "#40c4ff")
@@ -1917,11 +1917,11 @@ def _vr_color(uid):
 
 def vr_tick_loop():
     """20 Hz world tick + ~10 Hz snapshot fan-out to the vr room."""
-    tick_dt = 1.0 / env_int("VR_TICK_HZ", 20, 5, 50)
-    broadcast_every = max(1, round(
-        env_int("VR_SNAPSHOT_HZ", 10, 1, 20)
-        / float(env_int("VR_TICK_HZ", 20, 5, 50)) * tick_dt * 20))
+    tick_hz = env_int("VR_TICK_HZ", 20, 5, 50)
+    tick_dt = 1.0 / tick_hz
+    broadcast_every = max(1, round(tick_hz / env_int("VR_SNAPSHOT_HZ", 10, 1, 20)))
     counter = 0
+    finished_beats = 0
     while True:
         started = time.monotonic()
         with state_lock:
@@ -1930,8 +1930,15 @@ def vr_tick_loop():
         with vr_state_lock:
             if not emergency:            # D22: E-STOP freezes the world
                 VR.tick()
-            if VR.active and vr_members and counter % broadcast_every == 0:
+            # keep broadcasting briefly after FINISHED so the closing
+            # snapshot (results overlay) actually reaches clients
+            if VR.active:
+                finished_beats = 0
+            if (vr_members and counter % broadcast_every == 0
+                    and (VR.active or finished_beats < 20)):
                 snap = VR.snapshot()
+                if VR.state == VR_FINISHED:
+                    finished_beats += 1
         if snap is not None:
             try:
                 socketio.emit("vr:snapshot", snap, room="vr")
