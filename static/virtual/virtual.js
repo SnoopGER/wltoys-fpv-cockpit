@@ -8,6 +8,7 @@
 import {
   RoadRenderer, buildTrack, drawCar, drawBanana,
 } from './road.js';
+import { createBgm } from './bgm.js';
 
 const cfg = window.VR_CONFIG || { mode: 'dev', trackLength: 2000, user: null };
 const TRACK_LEN = cfg.trackLength || 2000;
@@ -28,6 +29,7 @@ const statusEl = $('vr-status');
 
 const track = buildTrack(TRACK_LEN, 42);
 const renderer = new RoadRenderer(canvas, track);
+const bgm = createBgm();
 
 const ITEM_SLOTS = [
   { key: '1', item: 'boost', icon: '🚀', name: 'BOOST' },
@@ -43,6 +45,7 @@ window.addEventListener('keydown', (e) => {
   if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
   const k = e.key.toLowerCase();
   if (!keys.has(k)) {
+    if (k === 'm') { toast('music ' + (bgm.toggle() ? 'on' : 'off')); }
     const slot = ITEM_SLOTS.find((s) => s.key === e.key);
     if (slot) pendingItems.add(slot.item);
   }
@@ -235,7 +238,12 @@ function frame(now) {
 
   if (cfg.mode === 'dev' || playerCar) {
     const speed = cfg.mode === 'dev' ? dev.speed : playerCar.speed;
-    const bounce = Math.sin(t * 30) * (speed / 60) * 2.5;
+    const boosting = cfg.mode === 'dev'
+      ? keys.has('shift')
+      : !!(playerCar.items && playerCar.items.includes('boost'));
+    if (boosting) drawSpeedStreaks(renderer, t);
+    const bounce = Math.sin(t * 30) * (speed / 60) * 2.5
+      + (boosting ? Math.sin(t * 90) * 1.2 : 0);
     drawCar(renderer.ctx, renderer.w / 2, renderer.h * 0.86 + bounce,
       renderer.h * 0.13,
       { color: cfg.mode === 'dev' ? '#7cff6b' : playerCar.color,
@@ -303,6 +311,24 @@ function updateLiveHud(s, me, t) {
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function drawSpeedStreaks(r, t) {
+  const ctx = r.ctx;
+  const cx = r.w / 2, cy = r.h * 0.5;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 22; i++) {
+    const a = (i / 22) * Math.PI * 2 + t * 0.6;
+    const r0 = r.h * 0.25 + ((i * 53 + t * 900) % (r.h * 0.5));
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0 * 0.7);
+    ctx.lineTo(cx + Math.cos(a) * (r0 + r.h * 0.12),
+      cy + Math.sin(a) * (r0 + r.h * 0.12) * 0.7);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 function mod(a, n) { return ((a % n) + n) % n; }

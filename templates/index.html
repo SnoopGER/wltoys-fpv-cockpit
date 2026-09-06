@@ -115,12 +115,20 @@
         <button class="btn btn-green driver-only" id="btnJoinQueue" onclick="joinQueue()">JOIN QUEUE</button>
         <button class="btn btn-blue driver-only" onclick="leaveQueue()">LEAVE</button>
       </div>
+      <div class="button-row">
+        <button class="btn btn-blue" onclick="window.location='/virtual'">🏁 VIRTUAL RACE</button>
+      </div>
     </div>
 
     {% if user and user.role == 'admin' %}
     <!-- Admin -->
     <div class="panel control-panel admin-panel">
       <div class="panel-header">🛡️ ADMIN</div>
+      <div class="button-row">
+        <button class="btn btn-green" onclick="vrCtl('start')">VR START</button>
+        <button class="btn btn-red" onclick="vrCtl('finish')">VR FINISH</button>
+        <button class="btn btn-blue" onclick="vrCtl('reset')">VR RESET</button>
+      </div>
       <div class="button-row">
         <button class="btn btn-red" onclick="adminAction('emergency_stop')">E-STOP</button>
         <button class="btn btn-blue" onclick="adminAction('pause')">PAUSE</button>
@@ -317,5 +325,11 @@
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script src="/static/app.js"></script>
 <script type="module" src="/static/video.js"></script>
+<script>
+async function vrCtl(action) {
+  const r = await fetch('/api/virtual/' + action, { method: 'POST' });
+  if (!r.ok) alert('virtual race ' + action + ' failed: ' + r.status);
+}
+</script>
 </body>
 </html>
