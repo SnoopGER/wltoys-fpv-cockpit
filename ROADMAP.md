@@ -57,7 +57,7 @@ item layer that changes the race:
 - [~] Send raw H.264 over WebSocket to browser; **WebCodecs `VideoDecoder`** render (Chrome/Edge/Safari 17+) — **backend + client built & sim-E2E green 2026-09-05** (commit 7d0896d: `/ws/video/<car>` + signed tokens + `static/video.js`); real-browser tunnel test pending
 - [~] Fallback ladder: WebCodecs → MSE → existing MJPEG (never a dead screen) — WebCodecs→MJPEG ladder implemented in video.js; MSE rung not needed yet
 - [~] Drop server-side JPEG re-encode from the hot path — MJPEG decoder now runs only when a `/api/stream` viewer is attached `[needs verify at track]`
-- [ ] HEVC path decision `[?]` (browser support is weak — likely transcode or force H.264 per car)
+- [~] HEVC path decision → **D14 (2026-09-06): H.264 primary via WebCodecs; probe per-car codec at track; HEVC → MJPEG for now**, transcode-vs-car-config decided after track numbers
 - [ ] Target: <150 ms glass-to-glass over tunnel `[?]` (needs real track measurement)
 - [ ] Per-car video health watchdog + auto-reconnect ("NO SIGNAL" recovery without page reload)
 
@@ -111,6 +111,7 @@ item layer that changes the race:
 | 11 | 2026-09-05 | ZENGARDEN/ZENADMIN persistent codes **removed**; replace via `PERSISTENT_CODES` env if the track still needs them | Source-visible admin backdoor + public `/api/guest/test` leak; **breaking** if the track relied on those codes — Snoop must re-grant via env or admin panel |
 | 12 | 2026-09-05 | E-STOP semantics: blocks all non-admin control until admin resumes | A driver's 20Hz loop must not override safety (AUDIT §6.2) |
 | 13 | 2026-09-05 | **Frontend direction:** ONE drive cockpit with a **Glass ⇄ Apex density toggle** (persisted per browser), **Pitlane** as lobby/RD-console style; NO three-skin dropdown | Snoop's call after design lab review; maintenance stays one-layout + one party theme |
+| 14 | 2026-09-06 | **Video: speed wins.** WebCodecs H.264 WS relay = primary; per-car codec probe at track; HEVC cars ride MJPEG fallback until transcode/car-config decision. Speed ceilings: run 70 first, bump to 80 only if it feels slow | Snoop delegated ("fast video, controls must not feel laggy"); latency target ≤150 ms tunnel, lower is better |
 
 ## Error / incident log
 | # | Date | What happened | Resolution |
@@ -120,7 +121,11 @@ item layer that changes the race:
 | 3 | 2026-09-05 | First `race_engine.modify()` treated `steer_range` as a wheel POSITION (center=50) — wrong: **it is a deflection magnitude; direction lives in `command`** (see `car_protocol.send_command`). Caught by own tests before touching hardware. | Reworked: banana clamps magnitude, red-shell pins `command` to a bounded one-sided turn. Protocol fact recorded here |
 
 ## Open questions for Snoop
-1. ~~Design/stack~~ → answered 2026-09-05 (hybrid design, RD console, soft safety, vanilla ES modules)
-2. Track PC specs/Windows version + does it already run cloudflared today? (deploy target = "different PC, different LAN, Windows")
-3. Real-hardware test session slot (needed to validate latency targets)
-4. Discord OAuth app credentials + redirect URIs for the tunnel domain (PUBLIC_BASE_URL suggests `https://race.zen-rc.net`) — needed to test the admin login path at all; plus which of the persistent codes (ZENGARDEN/ZENADMIN) stay active
+1. ~~Design/stack~~ → answered 2026-09-05 (hybrid design, RD console, soft safety, vanilla ES modules); drive-view direction locked D13
+2. ~~Track PC~~ → answered 2026-09-06: old V1 already deployed and running there, a Hermes instance on that box assists with ports + git clone → use `docs/track-session-checklist.md`
+3. ~~Real-hardware test slot~~ → answered: track session 2026-09-06 afternoon
+4. Discord OAuth — **worked previously**, so creds + redirect URI exist in the old deployment's env; TASK: copy them verbatim into the V2 env (exact same redirect string). Persistent codes: old ZEN-* backdoors dead; replacement env pattern in checklist, new codes handed to Snoop privately.
+5. Speed ceilings → answered: **test at 70 first, raise `MAX_REMOTE_SPEED_PERCENT` to 80 only if it feels slow**. (Note: race boost can only unlock up to MAX_REMOTE — at 70 boost == baseline; becomes meaningful when ceiling goes to 80.)
+6. HEVC → **Riko's call (D14, speed wins)**: WebCodecs H.264 relay is the primary path; probe `codec` per car at the track via `/api/video-token?car=carN`. HEVC-streaming cars ride the MJPEG fallback until we decide transcode-vs-car-config. Decision after track numbers.
+7. Item UX → explained to Snoop 2026-09-06 (RD does bookkeeping by hand: finish taps, drag items, tap armed zones); confirm item-use button mapping on the actual controllers at the track
+8. Latency target → answered: ≤150 ms tunnel acceptable, faster is better; measure LAN vs tunnel in test #8
