@@ -1057,6 +1057,21 @@ def index(car_id=None):
     return resp
 
 
+@app.route("/virtual")
+def virtual_race():
+    """Virtual Race (D16): pseudo-3D Turbo OutRun-style mini-game.
+    Same auth as the cockpit; ?dev=1 runs the standalone renderer harness."""
+    user = current_user()
+    resp = make_response(render_template(
+        "virtual.html",
+        user=public_user(user),
+        dev_mode=bool(request.args.get("dev")),
+        vr_track_length=env_int("VR_TRACK_LENGTH", 2000, 500, 20000),
+    ))
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+
 @app.route("/admin/cars")
 def admin_cars():
     user = current_user()
