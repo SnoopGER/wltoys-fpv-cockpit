@@ -90,6 +90,10 @@
     state.mode = 'mjpeg';
     showCanvas(false);
     try {
+      // REVIEW WEB-1 (2026-09-06): the wrapper set streaming=true when it
+      // started WebCodecs; the original startVideoStream would then
+      // early-return and the fallback would be a permanently blank screen.
+      if (window.setStreaming) window.setStreaming(false);
       if (window.FPVVideo && typeof window.__startVideoStreamOriginal === 'function') {
         window.__startVideoStreamOriginal();
       }
@@ -117,17 +121,22 @@
   }
 
   function restartWs() {
-    const gen = state.generation;
     stopWebCodecsKeepMode();
+    // REVIEW WEB-4 (2026-09-06): capture gen AFTER the generation bump —
+    // capturing before made the new socket's staleness guard discard every
+    // frame forever after the first decode desync.
+    const gen = state.generation;
     if (state.wantStream) {
+      if (state.restartTimer) clearTimeout(state.restartTimer);
       state.restartTimer = setTimeout(() => {
-        if (state.wantStream && gen !== undefined) startWs(gen);
+        if (state.wantStream && gen === state.generation) startWs(gen);
       }, 500);
     }
   }
 
   function stopWebCodecsKeepMode() {
     state.generation++;
+    if (state.restartTimer) { clearTimeout(state.restartTimer); state.restartTimer = null; }
     if (state.stallTimer) { clearInterval(state.stallTimer); state.stallTimer = null; }
     try { if (state.ws) state.ws.close(); } catch (e) {}
     state.ws = null;

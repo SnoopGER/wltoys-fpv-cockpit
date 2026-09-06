@@ -504,8 +504,11 @@ function initSocket() {
   socket.on('connect', () => {
     addLog('SYS', 'Lobby socket connected.');
     syncClockOffset();
-    setInterval(syncClockOffset, 5000);
   });
+  // REVIEW WEB-9 (2026-09-06): arm ONCE outside the connect handler —
+  // socket.io refires 'connect' on every reconnect and the old code stacked
+  // a fresh 5s interval per blip. syncClockOffset no-ops while disconnected.
+  setInterval(syncClockOffset, 5000);
   socket.on('lobby:update', renderLobby);
   socket.on('control:ack', (data) => {
     if (data && data.server_ts && lastCmdSentTs) {
@@ -685,13 +688,30 @@ window.addEventListener('gamepadconnected', (e) => {
 window.addEventListener('gamepaddisconnected', (e) => {
   addLog('SYS', '🎮 Disconnected: ' + (e.gamepad.id || '').substring(0, 50));
   refreshGamepadList();
+  // REVIEW WEB-2 (2026-09-06): a held gamepad command must not outlive its
+  // device — the 20Hz interval would keep re-sending it with fresh
+  // timestamps, so even the server's silence watchdog stays silent.
+  stopMotor();
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   const anyConnected = Array.from(pads).some(p => p !== null);
   if (!anyConnected) {
     if (gamepadPoller) { clearInterval(gamepadPoller); gamepadPoller = null; }
     gamepadActive = false;
-    if (activeKeys.size > 0) updateMotorFromKeys();
   }
+  if (activeKeys.size > 0) updateMotorFromKeys();
+});
+
+// REVIEW WEB-3 (2026-09-06): on Alt-Tab the keyup goes to the newly focused
+// window, never to this document — a held key would drive the car forever.
+function releaseAllInputs(reason) {
+  if (!motorInterval && activeKeys.size === 0) return;
+  activeKeys.clear();
+  stopMotor();
+  addLog('WARN', '⛔ ' + reason + ' — inputs released for safety.');
+}
+window.addEventListener('blur', () => releaseAllInputs('Window lost focus'));
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) releaseAllInputs('Tab hidden');
 });
 
 // ── Apply circular deadzone ──────────────────────────────

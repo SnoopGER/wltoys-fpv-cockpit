@@ -177,6 +177,13 @@ function releaseAllButtons() {
   sendCommand('stop');
 }
 
+// REVIEW WEB-3 (2026-09-06): focus lost -> buttonup goes to another window
+// and a held touch button would drive the car forever.
+window.addEventListener('blur', () => { if (activeButtons.size) releaseAllButtons(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && activeButtons.size) releaseAllButtons();
+});
+
 // ── Button Event Handlers ─────────────────────────────────
 function setupTouchControls() {
   const btnThrottle = $('btnThrottle');

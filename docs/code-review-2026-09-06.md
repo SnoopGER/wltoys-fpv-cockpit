@@ -8,6 +8,12 @@ Status: **flagged for review — no fixes applied yet.**
 Severity: P0 = must fix before racing through the tunnel · P1 = fix today if
 time allows · P2 = backlog.
 
+> **UPDATE 2026-09-06 (same day): Snoop green-lit the hotfix set.**
+> **FIXED & pushed:** SRV-1 · SRV-2 · SRV-3 · SRV-5 · SRV-6 · WEB-1 · WEB-2 ·
+> WEB-3 · WEB-4 · WEB-9 — regression tests added (`test_review_fixes.py`,
+> 8 new; 66 unit + 20 E2E + 5/5 smoke green; `node --check` clean).
+> Everything else stays OPEN as flagged.
+
 ---
 
 ## P0 — fix before the track session
