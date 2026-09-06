@@ -475,9 +475,10 @@ class VirtualRace:
                 for rank, c in enumerate(sorted(self.cars.values(), key=key,
                                                 reverse=True), 1)}
 
-    def snapshot(self):
-        """Full world snapshot ~10 Hz. Events drain once (single consumer
-        is fine: it's the broadcast fan-out point)."""
+    def snapshot(self, drain=True):
+        """Full world snapshot ~10 Hz. Events drain once per snapshot call —
+        the broadcast loop is the consumer; join-time snapshots pass
+        drain=False so they cannot swallow broadcast events."""
         now = self.clock()
         self._tick_state()
         ranks = self.positions()
@@ -520,7 +521,7 @@ class VirtualRace:
             "traps": [{"pos": round(t["pos"] % self.track_length, 2),
                        "lane": round(t["lane"], 3)} for t in self.traps],
             "results": list(self.results),
-            "events": self._drain_events(),
+            "events": self._drain_events() if drain else list(self._events),
         }
 
     def _emit(self, event):

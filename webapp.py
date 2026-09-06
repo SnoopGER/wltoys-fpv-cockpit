@@ -1890,6 +1890,138 @@ def api_stream_smart():
     return jsonify({"ok": True, "smart": smart})
 
 
+# ════════════════════════════════════════════════════════════════
+#  Virtual Race (D16-D22) — server-authoritative mini-game glue.
+#  Same namespace + auth as the cockpit ("vr" room); authority in
+#  virtual_race.py. D22: E-STOP freezes the virtual world too.
+# ════════════════════════════════════════════════════════════════
+
+from virtual_race import VirtualRace
+
+VR_COLORS = ("#ff2d95", "#00e5ff", "#ffd319", "#7cff6b",
+             "#ff8c42", "#b388ff", "#ff5252", "#40c4ff")
+
+vr_state_lock = threading.Lock()
+VR = VirtualRace(
+    track_length=env_int("VR_TRACK_LENGTH", 2000, 500, 20000),
+    laps=env_int("VR_LAPS", 3, 1, 20),
+    npc_count=env_int("VR_NPCS", 8, 0, 40),
+)
+vr_members = set()      # user ids ever joined to "vr" (kept for reconnects)
+vr_loop_started = False
+
+
+def _vr_color(uid):
+    return VR_COLORS[abs(hash(uid)) % len(VR_COLORS)]
+
+
+def vr_tick_loop():
+    """20 Hz world tick + ~10 Hz snapshot fan-out to the vr room."""
+    tick_dt = 1.0 / env_int("VR_TICK_HZ", 20, 5, 50)
+    broadcast_every = max(1, round(
+        env_int("VR_SNAPSHOT_HZ", 10, 1, 20)
+        / float(env_int("VR_TICK_HZ", 20, 5, 50)) * tick_dt * 20))
+    counter = 0
+    while True:
+        started = time.monotonic()
+        with state_lock:
+            emergency = bool(lobby.get("emergency_stop"))
+        snap = None
+        with vr_state_lock:
+            if not emergency:            # D22: E-STOP freezes the world
+                VR.tick()
+            if VR.active and vr_members and counter % broadcast_every == 0:
+                snap = VR.snapshot()
+        if snap is not None:
+            try:
+                socketio.emit("vr:snapshot", snap, room="vr")
+            except Exception:
+                app.logger.exception("vr snapshot broadcast failed")
+        counter += 1
+        time.sleep(max(0.0, tick_dt - (time.monotonic() - started)))
+
+
+def ensure_vr_loop():
+    global vr_loop_started
+    if vr_loop_started:
+        return
+    vr_loop_started = True
+    threading.Thread(target=vr_tick_loop, daemon=True).start()
+
+
+def vr_user(user):
+    name = user.get("username") or user.get("name") or str(user["id"])[:12]
+    with vr_state_lock:
+        return VR.add_player(user["id"], name, _vr_color(user["id"]))
+
+
+@app.route("/api/virtual/start", methods=["POST"])
+def api_virtual_start():
+    user, error = require_admin()
+    if error:
+        return error
+    with vr_state_lock:
+        ok = VR.start()
+    return jsonify({"ok": ok, "state": VR.state})
+
+
+@app.route("/api/virtual/finish", methods=["POST"])
+def api_virtual_finish():
+    user, error = require_admin()
+    if error:
+        return error
+    with vr_state_lock:
+        ok = VR.finish()
+    return jsonify({"ok": ok, "state": VR.state})
+
+
+@app.route("/api/virtual/reset", methods=["POST"])
+def api_virtual_reset():
+    user, error = require_admin()
+    if error:
+        return error
+    with vr_state_lock:
+        VR.reset()
+    return jsonify({"ok": True, "state": VR.state})
+
+
+@socketio.on("vr:join")
+def ws_vr_join(_data=None):
+    user = current_user()
+    if not user:
+        emit("vr:error", {"error": "login_required"})
+        return
+    if rate_limited(f"vrjoin:{user['id']}", limit=10, window=60):
+        emit("vr:error", {"error": "rate_limited"})
+        return
+    vr_user(user)
+    join_room("vr")
+    vr_members.add(user["id"])
+    ensure_vr_loop()
+    with vr_state_lock:
+        emit("vr:snapshot", VR.snapshot(drain=False))
+
+
+@socketio.on("vr:input")
+def ws_vr_input(data):
+    user = current_user()
+    if not user:
+        return
+    # 20 Hz legitimate; token window bounds spam (SRV-6 payload discipline)
+    if rate_limited(f"vrinput:{user['id']}", limit=45, window=1.0):
+        return
+    with state_lock:
+        if lobby.get("emergency_stop"):
+            return                       # D22
+    wants_item = isinstance(data, dict) and data.get("item") is not None
+    with vr_state_lock:
+        if user["id"] not in VR.cars:
+            vr_user(user)
+        ok, err = VR.apply_input(user["id"], data)
+    if wants_item:
+        emit("vr:item:ack", {"ok": ok, "error": err})
+
+
 # Socket.IO
 
 @socketio.on("connect")
@@ -1922,6 +2054,9 @@ def ws_disconnect():
                 if lobby["active_driver"] == user_id:
                     next_driver_locked("active driver disconnected")
                 changed = True
+        if user_id:
+            with vr_state_lock:
+                VR.mark_disconnected(user_id)   # car coasts; rejoin re-attaches
     leave_room("lobby")
     if changed:
         broadcast_lobby()
