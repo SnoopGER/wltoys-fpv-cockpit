@@ -348,7 +348,9 @@ race = RaceEngine(
 
 
 def normalize_car_id(car_id=None):
-    car_id = (car_id or request.args.get("car") or DEFAULT_CAR_ID).strip().lower()
+    # str() guard (REVIEW SRV-6): client-supplied car must never reach .strip() raw
+    car_id = (str(car_id) if car_id else None) or request.args.get("car") or DEFAULT_CAR_ID
+    car_id = car_id.strip().lower()
     return car_id if car_id in CAR_CONFIGS else DEFAULT_CAR_ID
 
 
@@ -841,19 +843,35 @@ def watchdog_control_silence():
 def timer_loop():
     while True:
         time.sleep(1)
+        try:
+            timer_tick()
+        except Exception:
+            # REVIEW SRV-2 (2026-09-06): one exception must never kill this
+            # thread — the control-silence watchdog, guest budgets and driver
+            # rotation all live here, and ensure_timer never respawns.
+            try:
+                app.logger.exception("timer tick failed")
+            except Exception:
+                pass
+
+
+def timer_tick():
+    # Expire guest sessions
+    expire_guest_sessions()
+    watchdog_control_silence()
+    with state_lock:
+        # REVIEW SRV-3: tick() runs under state_lock like every other race
+        # call site, so it cannot wedge the engine GREEN after a reset nor
+        # race race.snapshot()'s countdown_until read.
+        race_changed = race.tick()  # countdown -> green
         changed = False
         should_broadcast = False
-        # Expire guest sessions
-        expire_guest_sessions()
-        watchdog_control_silence()
-        race_changed = race.tick()  # countdown -> green
-        with state_lock:
-            if lobby["active_driver"] and not lobby["paused"]:
-                changed = advance_driver_if_due_locked("driver timer expired")
-                # Broadcast every second while a session is active so clients see the countdown.
-                should_broadcast = True
-        if changed or should_broadcast or race_changed:
-            broadcast_lobby()
+        if lobby["active_driver"] and not lobby["paused"]:
+            changed = advance_driver_if_due_locked("driver timer expired")
+            # Broadcast every second while a session is active so clients see the countdown.
+            should_broadcast = True
+    if changed or should_broadcast or race_changed:
+        broadcast_lobby()
 
 
 def validate_control_user(user):
@@ -921,13 +939,15 @@ def latency_stats():
 
 
 def handle_control_command(user, data, rx_ts=None):
+    if not isinstance(data, dict):  # REVIEW SRV-6: malformed WS frames
+        return {"ok": False, "error": "invalid_payload"}
     car_id = normalize_car_id(data.get("car"))
     slot = init_car(car_id)
     if rx_ts is None:
         rx_ts = time.time()
     with state_lock:
         cmd = data.get("command", "stop")
-        if cmd not in COMMANDS:
+        if not isinstance(cmd, str) or cmd not in COMMANDS:
             return {"ok": False, "error": "invalid_command"}
 
         # Server-side authorization (AUDIT §6.1): browser gating is not a boundary.
@@ -969,7 +989,24 @@ def handle_control_command(user, data, rx_ts=None):
 
 
 def local_request():
+    # REVIEW SRV-1 (2026-09-06): cloudflared connects to the origin over
+    # loopback, so remote_addr alone is NOT a locality signal — every tunnel
+    # visitor would appear local. Proxy headers present => remote by definition.
+    if request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For"):
+        return False
     return request.remote_addr in {"127.0.0.1", "::1", "localhost"}
+
+
+def client_ip():
+    """Real client IP for rate-limit keys (REVIEW SRV-1). The tunnel process
+    itself connects via loopback, so raw remote_addr collapses to 127.0.0.1
+    for every visitor. Trust CF-Connecting-IP only when the direct peer IS
+    loopback (our own cloudflared) — never from an arbitrary peer."""
+    if request.remote_addr in {"127.0.0.1", "::1", "localhost"}:
+        cf = request.headers.get("CF-Connecting-IP", "").strip()
+        if cf:
+            return cf
+    return request.remote_addr or "?"
 
 
 # HTML/Auth Routes
@@ -1071,7 +1108,7 @@ def discord_callback():
 
     expected_state = session.pop("discord_oauth_state", None)
     received_state = request.args.get("state")
-    if rate_limited(f"oauth:{request.remote_addr}", limit=10, window=60):
+    if rate_limited(f"oauth:{client_ip()}", limit=10, window=60):
         return "Too many login attempts. Wait a minute.", 429
     if not expected_state or not received_state or not secrets.compare_digest(expected_state, received_state):
         session.pop("discord_oauth_redirect_uri", None)
@@ -1376,7 +1413,7 @@ def rate_limited(key, limit=10, window=60.0):
 @app.route("/api/redeem-code", methods=["POST"])
 def api_redeem_code():
     """Guest: redeem a drive code to get driver access."""
-    if rate_limited(f"redeem:{request.remote_addr}", limit=10, window=60):
+    if rate_limited(f"redeem:{client_ip()}", limit=10, window=60):
         return jsonify({"ok": False, "error": "too_many_attempts"}), 429
     data = request.get_json(silent=True) or {}
     code = data.get("code", "").strip()
@@ -1402,9 +1439,11 @@ def api_guest_debug():
 
 @app.route("/api/guest/debug-generate", methods=["POST"])
 def api_guest_debug_generate():
-    """Temporary: generate a code without admin auth (local only)."""
-    if not local_request():
-        return jsonify({"ok": False, "error": "local_only"}), 403
+    """Temporary: generate a code. Admin session OR true-local (REVIEW SRV-1:
+    was local-only, but the tunnel made everyone 'local')."""
+    user, error = require_admin()
+    if error and not local_request():
+        return error
     code = generate_guest_code(30)
     return jsonify({"ok": True, "code": code})
 
@@ -1719,11 +1758,18 @@ def ws_video(ws, car_id):
         ws.close()
         return
     guest_info = active_guest_sessions.get(uid)
-    if guest_info is None and not uid.startswith("guest-"):
-        if not is_allowed_user(uid):
+    if uid.startswith("guest-"):
+        # REVIEW SRV-5 (2026-09-06): a guest stream needs a LIVE session —
+        # kicked/expired guests lose their active_guest_sessions entry, and a
+        # stale signed token must not outlive it.
+        if guest_info is None or time.time() > guest_info["expires_at"]:
             ws.send("fpv-auth-error")
             ws.close()
             return
+    elif not is_allowed_user(uid):
+        ws.send("fpv-auth-error")
+        ws.close()
+        return
     slot = init_car(car_id)
     relay = slot["relay"]
     sub = relay.subscribe()
@@ -1740,8 +1786,10 @@ def ws_video(ws, car_id):
                 ws.send(frame)  # bytes -> binary frame (flask-sock auto-detects)
             if time.time() - last_auth_check > 5:
                 last_auth_check = time.time()
+                # REVIEW SRV-5: re-check LIVE state, not the connect-time
+                # snapshot — kick/expire purge active_guest_sessions.
                 revoked = is_banned_user(uid) or (
-                    guest_info is not None and time.time() > guest_info["expires_at"])
+                    uid.startswith("guest-") and uid not in active_guest_sessions)
                 if revoked:
                     ws.send("fpv-auth-revoked")
                     break
