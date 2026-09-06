@@ -236,8 +236,8 @@ function frame(now) {
   if (cfg.mode === 'dev' || playerCar) {
     const speed = cfg.mode === 'dev' ? dev.speed : playerCar.speed;
     const bounce = Math.sin(t * 30) * (speed / 60) * 2.5;
-    drawCar(renderer.ctx, renderer.w / 2, renderer.h * 0.94 + bounce,
-      renderer.h * 0.16,
+    drawCar(renderer.ctx, renderer.w / 2, renderer.h * 0.86 + bounce,
+      renderer.h * 0.13,
       { color: cfg.mode === 'dev' ? '#7cff6b' : playerCar.color,
         items: cfg.mode === 'dev' ? [] : playerCar.items, name: '' },
       { steerVis, hideTag: true });
@@ -290,7 +290,7 @@ function updateLiveHud(s, me, t) {
   }
 
   if (s.state === 'finished' && s.results.length) {
-    resultsEl.style.display = 'block';
+    resultsEl.style.display = 'flex';
     resultsEl.innerHTML = '<h2>RACE RESULTS</h2>' + s.results.map((r) => {
       const c = s.cars.find((cc) => cc.id === r.user) || { name: r.user };
       return `<div class="vr-res-row"><b>${r.place}.</b> ${escapeHtml(c.name || r.user)}${r.dnf ? ' <i>(dnf)</i>' : ''}</div>`;

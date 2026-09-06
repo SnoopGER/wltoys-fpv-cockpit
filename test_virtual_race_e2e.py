@@ -240,6 +240,13 @@ class VirtualRaceE2E(unittest.TestCase):
         self.wait_for(a_moving, timeout=6, msg="A's car never resumed driving")
         stop_a2.set()
 
+        # 4. admin ends the race: clients must actually RECEIVE the closing
+        #    finished snapshot (regression guard: broadcast-after-FINISHED)
+        r = sess_adm.post(self.base + "/api/virtual/finish", timeout=5)
+        self.assertTrue(r.json().get("ok"), r.text)
+        self.wait_for(lambda: rec_b.last and rec_b.last["state"] == "finished",
+                      timeout=6, msg="finished snapshot never reached B")
+
         for cli in (cli_b, cli_a2):
             try:
                 cli.disconnect()
